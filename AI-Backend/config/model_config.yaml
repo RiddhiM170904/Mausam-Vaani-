@@ -1,0 +1,33 @@
+# Model Configuration
+model:
+  hidden_dim: 128
+  num_heads: 4
+  num_layers: 2
+  forecast_horizon: 24
+  dropout: 0.1
+
+# Data Configuration
+data:
+  csv_path: "data/weather_time_series.csv"
+  encoder_steps: 168  # 1 week of hourly data
+  forecast_steps: 24  # Predict next 24 hours
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+
+# Training Configuration
+training:
+  epochs: 100
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  early_stopping_patience: 15
+  save_every: 5
+  num_workers: 0  # Set to 0 for Windows, 4 for Linux/Mac
+
+# Paths
+paths:
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"
+  results_dir: "results"

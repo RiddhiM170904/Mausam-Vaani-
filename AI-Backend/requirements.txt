@@ -1,0 +1,30 @@
+# Python Dependencies for Mausam-Vaani AI Backend
+
+# ===== Core Deep Learning =====
+torch>=2.0.0
+torchvision>=0.15.0
+
+# ===== Data Processing =====
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+
+# ===== Flask API =====
+Flask>=3.0.0
+flask-cors>=4.0.0
+python-dotenv>=1.0.0
+
+# ===== Gemini AI =====
+google-generativeai>=0.3.0
+
+# ===== Visualization & Evaluation =====
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# ===== Training & Logging =====
+tensorboard>=2.14.0
+tqdm>=4.65.0
+pyyaml>=6.0.0
+
+# ===== Utilities =====
+requests>=2.31.0
