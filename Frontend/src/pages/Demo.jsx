@@ -6,8 +6,6 @@ const Demo = () => {
   const [loading, setLoading] = useState(false)
   const [apiStatus, setApiStatus] = useState(null)
   const [formData, setFormData] = useState({
-    latitude: 28.6139,
-    longitude: 77.2090,
     locationName: 'Delhi',
     profession: 'Farmer',
     crop: 'Rice',
@@ -47,8 +45,6 @@ const Demo = () => {
     try {
       const result = await getWeatherPrediction({
         weatherInput: {
-          latitude: parseFloat(formData.latitude),
-          longitude: parseFloat(formData.longitude),
           location_name: formData.locationName,
         },
         userContext: {
@@ -107,38 +103,12 @@ const Demo = () => {
                   value={formData.locationName}
                   onChange={handleInputChange}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
-                  placeholder="e.g., Delhi, Mumbai"
+                  placeholder="e.g., Delhi, Mumbai, New York"
+                  required
                 />
-              </div>
-
-              {/* Coordinates */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Latitude
-                  </label>
-                  <input
-                    type="number"
-                    name="latitude"
-                    value={formData.latitude}
-                    onChange={handleInputChange}
-                    step="0.0001"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Longitude
-                  </label>
-                  <input
-                    type="number"
-                    name="longitude"
-                    value={formData.longitude}
-                    onChange={handleInputChange}
-                    step="0.0001"
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none"
-                  />
-                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  Enter any city name - we'll fetch real-time weather data
+                </p>
               </div>
 
               {/* Profession */}

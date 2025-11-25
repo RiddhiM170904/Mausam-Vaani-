@@ -16,6 +16,7 @@ Just run: python colab_simple_train.py
 import os
 import sys
 import time
+import pickle
 from datetime import datetime
 from pathlib import Path
 
@@ -471,6 +472,32 @@ print(f"\n✓ Training completed!")
 print(f"✓ Best validation loss: {best_val_loss:.4f}")
 print(f"✓ Model saved to: {CONFIG['paths']['best_model']}")
 
+# Save scalers and metadata
+scaler_path = '/content/scalers.pkl'
+metadata_path = '/content/model_metadata.pkl'
+
+try:
+    # Note: The current implementation doesn't use scalers during training
+    # But we save the processor info for reference
+    metadata = {
+        'feature_cols': data_splits['feature_cols'],
+        'target_cols': data_splits['target_cols'],
+        'num_features': len(data_splits['feature_cols']),
+        'num_targets': data_splits['num_targets'],
+        'model_config': CONFIG['model'],
+        'data_config': CONFIG['data'],
+    }
+    
+    with open(metadata_path, 'wb') as f:
+        pickle.dump(metadata, f)
+    
+    print(f"✓ Model metadata saved to: {metadata_path}")
+    print(f"  - Features: {metadata['feature_cols']}")
+    print(f"  - Targets: {metadata['target_cols']}")
+    
+except Exception as e:
+    print(f"⚠️ Could not save metadata: {e}")
+
 # ============================================================================
 # STEP 5: VISUALIZATION
 # ============================================================================
@@ -491,6 +518,8 @@ print("\n" + "="*80)
 print("🎉 TRAINING COMPLETE!")
 print("="*80)
 print(f"End Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-print(f"\nDownload your trained model:")
-print(f"  {CONFIG['paths']['best_model']}")
+print(f"\nDownload these files:")
+print(f"  Model: {CONFIG['paths']['best_model']}")
+print(f"  Metadata: {metadata_path}")
+print(f"\nPlace them in AI-Backend/ directory")
 print("="*80)

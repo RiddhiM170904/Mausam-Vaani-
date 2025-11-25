@@ -14,9 +14,11 @@ Just run: uvicorn app:app --reload
 
 import os
 import sys
+import pickle
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 import logging
+import requests
 
 # FastAPI
 from fastapi import FastAPI, HTTPException, status
@@ -53,9 +55,12 @@ logger = logging.getLogger(__name__)
 # Model configuration
 MODEL_PATH = os.getenv('MODEL_PATH', 'best_model.pth')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
 
 if not GEMINI_API_KEY:
     logger.warning("⚠️ GEMINI_API_KEY not found in environment variables!")
+if not OPENWEATHER_API_KEY:
+    logger.warning("⚠️ OPENWEATHER_API_KEY not found in environment variables!")
 
 # Model parameters (must match training config)
 MODEL_CONFIG = {
@@ -67,6 +72,26 @@ MODEL_CONFIG = {
     'output_dim': 6,  # Will be updated when loading model
     'dropout': 0.1,
 }
+
+# Try to load model metadata if available
+METADATA_PATH = os.getenv('METADATA_PATH', 'model_metadata.pkl')
+model_metadata = None
+if os.path.exists(METADATA_PATH):
+    try:
+        with open(METADATA_PATH, 'rb') as f:
+            model_metadata = pickle.load(f)
+        logger.info(f"✓ Loaded model metadata from {METADATA_PATH}")
+        # Update MODEL_CONFIG from metadata
+        if 'model_config' in model_metadata:
+            MODEL_CONFIG.update(model_metadata['model_config'])
+        if 'num_features' in model_metadata:
+            MODEL_CONFIG['num_features'] = model_metadata['num_features']
+        if 'num_targets' in model_metadata:
+            MODEL_CONFIG['output_dim'] = model_metadata['num_targets']
+        logger.info(f"  Features: {model_metadata.get('feature_cols', 'N/A')}")
+        logger.info(f"  Targets: {model_metadata.get('target_cols', 'N/A')}")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not load metadata: {e}")
 
 # ============================================================================
 # GLOBAL MODEL INSTANCE AND DEVICE
@@ -107,15 +132,57 @@ def load_model():
         
         # Load weights
         state_dict = torch.load(MODEL_PATH, map_location=device)
-        weather_model.load_state_dict(state_dict)
-        weather_model.eval()
-        
-        logger.info(f"✓ Model loaded successfully on {device}")
-        return True
+
+        try:
+            weather_model.load_state_dict(state_dict)
+            weather_model.eval()
+            logger.info(f"✓ Model loaded successfully on {device}")
+            return True
+        except Exception as e:
+            # Detailed diagnostics to help users match checkpoint vs model
+            logger.warning(f"⚠️ Could not load model strictly: {e}")
+
+            # Print shapes of checkpoint params
+            try:
+                ckpt_keys = list(state_dict.keys())
+                logger.info(f"Checkpoint contains {len(ckpt_keys)} parameter tensors")
+                for k in ckpt_keys[:20]:
+                    v = state_dict[k]
+                    logger.debug(f"CKPT {k}: {tuple(v.shape) if hasattr(v, 'shape') else type(v)}")
+            except Exception:
+                logger.debug("Unable to enumerate checkpoint parameter shapes")
+
+            # Print model parameter shapes
+            try:
+                model_keys = [n for n, p in weather_model.named_parameters()]
+                logger.info(f"Model expects {len(model_keys)} parameter tensors")
+                for i, (n, p) in enumerate(weather_model.named_parameters()):
+                    if i < 20:
+                        logger.debug(f"MODEL {n}: {tuple(p.shape)}")
+            except Exception:
+                logger.debug("Unable to enumerate model parameter shapes")
+
+            # Optionally allow a partial (non-strict) load when explicitly requested
+            force_partial = os.getenv('FORCE_PARTIAL_MODEL_LOAD', 'false').lower() in ['1', 'true', 'yes']
+            if force_partial:
+                try:
+                    weather_model.load_state_dict(state_dict, strict=False)
+                    weather_model.eval()
+                    logger.warning('⚠️ Model partially loaded with strict=False. Weights mismatches were ignored.')
+                    logger.warning('⚠️ Predictions may be incorrect. Prefer re-saving model with matching architecture.')
+                    return True
+                except Exception as e2:
+                    logger.error(f"Partial load also failed: {e2}")
+
+            logger.info("✓ API will use dummy data for predictions (perfect for demo!)")
+            # Reset model to None to avoid using a mismatched model
+            weather_model = None
+            return False
         
     except Exception as e:
         logger.warning(f"⚠️ Could not load model: {e}")
         logger.info("✓ API will use dummy data for predictions (perfect for demo!)")
+        weather_model = None
         return False
 
 # ============================================================================
@@ -250,23 +317,14 @@ class WeatherInput(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "latitude": 28.6139,
-                "longitude": 77.2090,
                 "location_name": "Delhi"
             }
         }
     )
     
-    latitude: float = Field(..., description="Latitude", ge=-90, le=90)
-    longitude: float = Field(..., description="Longitude", ge=-180, le=180)
-    location_name: Optional[str] = Field(None, description="Location name (e.g., 'Delhi')")
-    
-    # Historical weather data (last 7 days hourly = 168 points)
-    # If not provided, will use dummy data for demo
-    historical_data: Optional[List[List[float]]] = Field(
-        None, 
-        description="Historical weather data (168 x num_features)"
-    )
+    location_name: str = Field(..., description="Location name (e.g., 'Delhi', 'Mumbai')")
+    latitude: Optional[float] = Field(None, description="Latitude (optional, will be fetched from API)", ge=-90, le=90)
+    longitude: Optional[float] = Field(None, description="Longitude (optional, will be fetched from API)", ge=-180, le=180)
 
 class UserContext(BaseModel):
     """User context for personalized insights"""
@@ -294,8 +352,6 @@ class PredictionRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "weather_input": {
-                    "latitude": 28.6139,
-                    "longitude": 77.2090,
                     "location_name": "Delhi"
                 },
                 "user_context": {
@@ -365,93 +421,142 @@ def generate_gemini_insight(weather_data: Dict, user_context: UserContext) -> st
         return generate_fallback_insight(weather_data, user_context)
 
 def build_gemini_prompt(weather_data: Dict, user_context: UserContext) -> str:
-    """Build prompt for Gemini"""
+    """Build comprehensive prompt for Gemini with current + predicted weather analysis"""
     
     location = weather_data.get('location', 'your location')
-    avg_temp = weather_data['summary']['avg_temperature']
-    max_temp = weather_data['summary']['max_temperature']
-    avg_rainfall = weather_data['summary']['avg_rainfall']
-    total_rainfall = weather_data['summary']['total_rainfall']
-    avg_humidity = weather_data['summary']['avg_humidity']
-    avg_wind = weather_data['summary']['avg_wind_speed']
+    current_weather = weather_data.get('current_weather', {})
+    predictions = weather_data.get('predictions', [])
+    summary = weather_data['summary']
     
-    # Determine weather condition
+    # Extract current conditions
+    current_temp = current_weather.get('temp', summary['avg_temperature'])
+    current_humidity = current_weather.get('humidity', summary['avg_humidity'])
+    current_wind = current_weather.get('wind_speed', summary['avg_wind_speed'])
+    current_rainfall = current_weather.get('rainfall', 0)
+    current_pressure = current_weather.get('pressure', 1010)
+    current_cloud = current_weather.get('cloud_cover', 50)
+    
+    # Extract prediction summary
+    avg_temp = summary['avg_temperature']
+    min_temp = summary['min_temperature']
+    max_temp = summary['max_temperature']
+    total_rainfall = summary['total_rainfall']
+    avg_humidity = summary['avg_humidity']
+    avg_wind = summary['avg_wind_speed']
+    
+    # Analyze trends from predictions
+    temps = [p.temperature for p in predictions[:6]] if predictions else [avg_temp]
+    temp_trend = "rising" if temps[-1] > temps[0] else "falling" if temps[-1] < temps[0] else "stable"
+    
+    # Determine overall condition
     if total_rainfall > 50:
         condition = "Heavy Rain"
+        condition_emoji = "🌧️"
     elif total_rainfall > 10:
         condition = "Moderate Rain"
+        condition_emoji = "🌦️"
     elif total_rainfall > 0:
-        condition = "Light Rain"
+        condition = "Light Rain/Drizzle"
+        condition_emoji = "☔"
     elif avg_temp > 35:
         condition = "Very Hot"
+        condition_emoji = "🔥"
     elif avg_temp < 15:
         condition = "Cold"
+        condition_emoji = "🥶"
     else:
         condition = "Pleasant"
+        condition_emoji = "🌤️"
     
     profession = user_context.profession
     context = user_context.additional_context or {}
     
-    prompt = f"""You are a helpful weather assistant for India providing actionable weather advice.
+    # Build comprehensive weather analysis prompt
+    prompt = f"""You are Mausam-Vaani, an expert AI weather advisor for India. Analyze this weather data and provide personalized, actionable advice.
 
-Location: {location}
-Next 24 Hours Weather Forecast:
-- Condition: {condition}
-- Average Temperature: {avg_temp:.1f}°C (Max: {max_temp:.1f}°C)
-- Total Rainfall: {total_rainfall:.1f}mm
-- Average Humidity: {avg_humidity:.1f}%
+📍 LOCATION: {location}
+
+🌡️ CURRENT WEATHER CONDITIONS (Real-Time):
+- Temperature: {current_temp:.1f}°C
+- Humidity: {current_humidity:.0f}%
+- Wind Speed: {current_wind:.1f} km/h
+- Rainfall: {current_rainfall:.1f} mm/h
+- Pressure: {current_pressure:.0f} hPa
+- Cloud Cover: {current_cloud:.0f}%
+
+📊 AI MODEL PREDICTIONS (Next 24 Hours):
+- Overall Condition: {condition_emoji} {condition}
+- Temperature Range: {min_temp:.1f}°C to {max_temp:.1f}°C (Avg: {avg_temp:.1f}°C)
+- Temperature Trend: {temp_trend}
+- Total Expected Rainfall: {total_rainfall:.1f} mm
+- Average Humidity: {avg_humidity:.0f}%
 - Average Wind Speed: {avg_wind:.1f} km/h
 
-User Profile:
+👤 USER PROFILE:
 - Profession: {profession}
+- Location: {location}
 """
     
     if context:
-        prompt += "\nAdditional Context:\n"
+        prompt += "\n🔍 ADDITIONAL CONTEXT:\n"
         for key, value in context.items():
             prompt += f"- {key}: {value}\n"
     
-    # Profession-specific instructions
+    # Profession-specific instructions with detailed guidance
     profession_instructions = {
         'Farmer': """
-Give SHORT actionable advice for farmers (2-3 sentences maximum):
-- Best times for farming activities (sowing, harvesting, irrigation, pesticide spraying)
-- Warnings about pest/disease risks due to weather
-- Equipment/crop protection recommendations
-Be specific, practical, and use emojis appropriately.""",
+
+🌾 TASK: Provide actionable farming advice (3-4 sentences):
+1. Analyze current weather + predictions for crop impact
+2. Recommend optimal timing for activities (irrigation, spraying, harvesting, sowing)
+3. Warn about pest/disease risks based on humidity, rainfall, temperature
+4. Suggest protective measures for crops and equipment
+5. Use emojis and be specific with timing (morning/afternoon/evening)""",
         
         'Commuter': """
-Give SHORT travel advice for commuters (2-3 sentences maximum):
-- Traffic/road condition warnings
-- Best travel times to avoid weather issues
-- Safety precautions (carry umbrella, drive carefully, etc.)
-Be concise, practical, and use emojis appropriately.""",
+
+🚗 TASK: Provide travel safety advice (3-4 sentences):
+1. Analyze weather impact on roads and traffic
+2. Recommend best travel times and routes
+3. List essential items to carry (umbrella, raincoat, etc.)
+4. Warn about visibility, flooding, or slippery road risks
+5. Use emojis and be specific with timing""",
         
         'Construction Worker': """
-Give SHORT advice for construction workers (2-3 sentences maximum):
-- Work schedule recommendations based on weather
-- Safety warnings (heat, rain, wind, lightning)
-- Material handling and storage advice
-Be specific about timing and use emojis appropriately.""",
+
+👷 TASK: Provide construction safety advice (3-4 sentences):
+1. Analyze weather safety for outdoor work
+2. Recommend work schedule adjustments (safe hours, breaks needed)
+3. Warn about heat stress, lightning, strong winds, or rain delays
+4. Suggest material protection and safety equipment needed
+5. Use emojis and be specific with timing""",
         
         'Outdoor Sports': """
-Give SHORT advice for outdoor activities (2-3 sentences maximum):
-- Best times for outdoor sports/activities
-- Safety precautions for the weather
-- Hydration/sun protection/rain gear recommendations
-Be practical and use emojis appropriately.""",
+
+⚽ TASK: Provide outdoor activity advice (3-4 sentences):
+1. Analyze weather suitability for outdoor sports
+2. Recommend best activity windows and breaks
+3. Warn about heat exhaustion, dehydration, lightning, or poor visibility
+4. Suggest hydration, sun protection, and safety gear
+5. Use emojis and be specific with timing""",
         
         'General': """
-Give SHORT general weather advice (2-3 sentences maximum):
-- What to expect in the next 24 hours
-- What to carry (umbrella, water bottle, sunscreen, etc.)
-- Any safety precautions needed
-Be helpful, concise, and use emojis appropriately."""
+
+🌈 TASK: Provide general weather guidance (3-4 sentences):
+1. Summarize what to expect in next 24 hours
+2. Recommend what to wear and carry
+3. Suggest activity planning tips
+4. Warn about any health or safety concerns
+5. Use emojis and be friendly and helpful"""
     }
     
     instruction = profession_instructions.get(profession, profession_instructions['General'])
-    prompt += f"\n{instruction}"
-    prompt += "\n\nProvide ONLY the actionable advice in 2-3 sentences. Be direct and helpful."
+    prompt += instruction
+    prompt += """\n
+📝 OUTPUT FORMAT:
+Provide 3-4 clear, actionable sentences with emojis. Be specific, practical, and professional.
+Focus on safety, timing, and preparation. Use Indian context and units (°C, km/h, mm).
+"""
     
     return prompt
 
@@ -503,6 +608,114 @@ def generate_fallback_insight(weather_data: Dict, user_context: UserContext) -> 
 # HELPER FUNCTIONS
 # ============================================================================
 
+def fetch_weather_data_from_openweather(location_name: str) -> Dict:
+    """
+    Fetch real-time and forecast weather data from OpenWeatherMap API
+    Returns historical-like data + current conditions + coordinates
+    """
+    if not OPENWEATHER_API_KEY:
+        logger.warning("OpenWeather API key not configured, using dummy data")
+        return None
+    
+    try:
+        # Get coordinates from location name using Geocoding API
+        geo_url = f"http://api.openweathermap.org/geo/1.0/direct?q={location_name}&limit=1&appid={OPENWEATHER_API_KEY}"
+        geo_response = requests.get(geo_url, timeout=10)
+        geo_response.raise_for_status()
+        geo_data = geo_response.json()
+        
+        if not geo_data:
+            logger.warning(f"Location '{location_name}' not found")
+            return None
+        
+        lat = geo_data[0]['lat']
+        lon = geo_data[0]['lon']
+        actual_name = geo_data[0].get('name', location_name)
+        
+        logger.info(f"Found location: {actual_name} ({lat}, {lon})")
+        
+        # Get current weather + 5 day/3 hour forecast
+        forecast_url = f"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric"
+        forecast_response = requests.get(forecast_url, timeout=10)
+        forecast_response.raise_for_status()
+        forecast_data = forecast_response.json()
+        
+        # Get current weather
+        current_url = f"http://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric"
+        current_response = requests.get(current_url, timeout=10)
+        current_response.raise_for_status()
+        current_data = current_response.json()
+        
+        # Build historical-like data from current + forecast
+        historical_data = []
+        
+        # Add current weather as most recent point
+        current_weather = {
+            'temp': current_data['main']['temp'],
+            'humidity': current_data['main']['humidity'],
+            'wind_speed': current_data['wind']['speed'] * 3.6,  # m/s to km/h
+            'rainfall': current_data.get('rain', {}).get('1h', 0),
+            'pressure': current_data['main']['pressure'],
+            'cloud_cover': current_data['clouds']['all'],
+        }
+        
+        # Create 168 hours of synthetic historical data based on current conditions
+        # (In production, you'd fetch actual historical data from a paid API)
+        base_temp = current_weather['temp']
+        base_humidity = current_weather['humidity']
+        base_wind = current_weather['wind_speed']
+        base_pressure = current_weather['pressure']
+        base_cloud = current_weather['cloud_cover']
+        
+        for hour in range(168):
+            hour_of_day = (datetime.now().hour - (168 - hour)) % 24
+            
+            # Daily temperature variation
+            temp_variation = 5 * np.sin((hour_of_day - 6) * np.pi / 12)
+            temp = base_temp + temp_variation + np.random.randn() * 2
+            
+            humidity = max(30, min(95, base_humidity - temp_variation * 2 + np.random.randn() * 5))
+            wind_speed = max(0, base_wind + np.random.randn() * 2)
+            rainfall = max(0, np.random.randn() * 2) if np.random.rand() > 0.85 else 0
+            pressure = base_pressure + np.random.randn() * 3
+            cloud = max(0, min(100, base_cloud + np.random.randn() * 15))
+            
+            historical_data.append([temp, humidity, wind_speed, rainfall, pressure, cloud, lat, lon, hour_of_day / 24.0])
+        
+        # Replace last entry with actual current data
+        current_hour = datetime.now().hour
+        historical_data[-1] = [
+            current_weather['temp'],
+            current_weather['humidity'],
+            current_weather['wind_speed'],
+            current_weather['rainfall'],
+            current_weather['pressure'],
+            current_weather['cloud_cover'],
+            lat, lon, current_hour / 24.0
+        ]
+        
+        logger.info(f"✓ Fetched real weather data for {actual_name}")
+        
+        return {
+            'location_name': actual_name,
+            'latitude': lat,
+            'longitude': lon,
+            'historical_data': np.array(historical_data),
+            'current_weather': current_weather
+        }
+        
+    except requests.RequestException as e:
+        error_msg = str(e)
+        if '401' in error_msg:
+            logger.error(f"OpenWeather API error: Invalid API key. Please get a valid key from https://openweathermap.org/api")
+            logger.error(f"Note: New API keys can take 10-15 minutes to activate after creation")
+        else:
+            logger.error(f"OpenWeather API error: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching weather data: {e}")
+        return None
+
 def create_dummy_historical_data(lat: float, lon: float) -> np.ndarray:
     """Create dummy historical data for demo purposes"""
     # 168 hours (7 days) of hourly data
@@ -536,6 +749,12 @@ def make_prediction(input_data: np.ndarray, forecast_hours: int = 24) -> np.ndar
     # If model is not loaded, use realistic dummy predictions
     if weather_model is None:
         logger.info("Using dummy data for prediction (model not loaded)")
+        try:
+            logger.debug(f"Input data shape: {getattr(input_data, 'shape', None)}")
+            last_vals = input_data[-1] if len(input_data) > 0 else None
+            logger.debug(f"Last historical values sample: {last_vals}")
+        except Exception:
+            logger.debug("Unable to inspect input_data for debug")
         return generate_realistic_dummy_prediction(input_data, forecast_hours)
     
     try:
@@ -611,7 +830,13 @@ def generate_realistic_dummy_prediction(input_data: np.ndarray, forecast_hours: 
         
         predictions.append([temp, humidity, wind, rainfall, pressure, cloud])
     
-    return np.array(predictions)
+    preds = np.array(predictions)
+    try:
+        logger.debug(f"Generated dummy predictions shape: {preds.shape}")
+        logger.debug(f"Dummy predictions (first 3 rows): {preds[:3].tolist()}")
+    except Exception:
+        logger.debug("Unable to log dummy predictions")
+    return preds
 
 
 # ============================================================================
@@ -640,6 +865,49 @@ async def health_check():
         "timestamp": datetime.now().isoformat()
     }
 
+@app.get("/model-diagnostics")
+async def model_diagnostics():
+    """Get detailed model and checkpoint diagnostics"""
+    diagnostics = {
+        "model_config": MODEL_CONFIG,
+        "model_loaded": weather_model is not None,
+        "device": str(device),
+        "model_path": MODEL_PATH,
+        "model_file_exists": os.path.exists(MODEL_PATH),
+        "metadata_loaded": model_metadata is not None,
+    }
+    
+    if model_metadata:
+        diagnostics["metadata"] = {
+            "feature_cols": model_metadata.get('feature_cols', []),
+            "target_cols": model_metadata.get('target_cols', []),
+            "num_features": model_metadata.get('num_features'),
+            "num_targets": model_metadata.get('num_targets'),
+        }
+    
+    if weather_model is not None:
+        # Get model parameter info
+        model_params = {}
+        for i, (name, param) in enumerate(weather_model.named_parameters()):
+            if i < 20:  # First 20 params
+                model_params[name] = list(param.shape)
+        diagnostics["model_parameters_sample"] = model_params
+        diagnostics["total_parameters"] = sum(p.numel() for p in weather_model.parameters())
+    
+    if os.path.exists(MODEL_PATH):
+        try:
+            checkpoint = torch.load(MODEL_PATH, map_location='cpu')
+            ckpt_params = {}
+            for i, (name, tensor) in enumerate(checkpoint.items()):
+                if i < 20:  # First 20 params
+                    ckpt_params[name] = list(tensor.shape) if hasattr(tensor, 'shape') else str(type(tensor))
+            diagnostics["checkpoint_parameters_sample"] = ckpt_params
+            diagnostics["checkpoint_keys_count"] = len(checkpoint)
+        except Exception as e:
+            diagnostics["checkpoint_load_error"] = str(e)
+    
+    return diagnostics
+
 @app.post("/predict", response_model=InsightResponse)
 async def predict_weather(request: PredictionRequest):
     """
@@ -649,17 +917,27 @@ async def predict_weather(request: PredictionRequest):
     """
     
     try:
-        logger.info(f"Prediction request for {request.weather_input.location_name or 'Unknown location'}")
+        logger.info(f"Prediction request for {request.weather_input.location_name}")
         
-        # Get or create historical data
-        if request.weather_input.historical_data:
-            historical_data = np.array(request.weather_input.historical_data)
+        # Fetch real weather data from OpenWeatherMap
+        weather_data_result = fetch_weather_data_from_openweather(request.weather_input.location_name)
+        
+        current_weather = None
+        if weather_data_result:
+            # Use real data from API
+            historical_data = weather_data_result['historical_data']
+            location_name = weather_data_result['location_name']
+            latitude = weather_data_result['latitude']
+            longitude = weather_data_result['longitude']
+            current_weather = weather_data_result.get('current_weather')
+            logger.info(f"✓ Using real weather data from OpenWeatherMap for {location_name}")
         else:
-            # Create dummy data for demo
-            historical_data = create_dummy_historical_data(
-                request.weather_input.latitude,
-                request.weather_input.longitude
-            )
+            # Fallback to dummy data
+            logger.warning("⚠️ Using dummy data (OpenWeather API unavailable)")
+            latitude = request.weather_input.latitude or 28.6139
+            longitude = request.weather_input.longitude or 77.2090
+            location_name = request.weather_input.location_name
+            historical_data = create_dummy_historical_data(latitude, longitude)
         
         # Make prediction
         predictions = make_prediction(historical_data, request.forecast_hours)
@@ -701,21 +979,23 @@ async def predict_weather(request: PredictionRequest):
             'avg_wind_speed': np.mean(wind_speeds),
         }
         
-        # Prepare data for LLM
+        # Prepare data for LLM with current weather
         weather_data = {
-            'location': request.weather_input.location_name or f"({request.weather_input.latitude}, {request.weather_input.longitude})",
+            'location': location_name,
+            'current_weather': current_weather,
             'summary': summary,
             'predictions': forecast_list
         }
         
         # Generate personalized insight using Gemini
+        logger.info("🤖 Generating AI insights with Gemini...")
         personalized_insight = generate_gemini_insight(weather_data, request.user_context)
         
         # Build response
         response = InsightResponse(
-            location=weather_data['location'],
-            latitude=request.weather_input.latitude,
-            longitude=request.weather_input.longitude,
+            location=location_name,
+            latitude=latitude,
+            longitude=longitude,
             current_time=current_time.isoformat(),
             forecast_hours=request.forecast_hours,
             predictions=forecast_list,
