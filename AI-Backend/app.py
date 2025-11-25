@@ -448,115 +448,135 @@ def build_gemini_prompt(weather_data: Dict, user_context: UserContext) -> str:
     temps = [p.temperature for p in predictions[:6]] if predictions else [avg_temp]
     temp_trend = "rising" if temps[-1] > temps[0] else "falling" if temps[-1] < temps[0] else "stable"
     
-    # Determine overall condition
-    if total_rainfall > 50:
-        condition = "Heavy Rain"
-        condition_emoji = "🌧️"
-    elif total_rainfall > 10:
-        condition = "Moderate Rain"
-        condition_emoji = "🌦️"
-    elif total_rainfall > 0:
-        condition = "Light Rain/Drizzle"
-        condition_emoji = "☔"
-    elif avg_temp > 35:
-        condition = "Very Hot"
-        condition_emoji = "🔥"
-    elif avg_temp < 15:
-        condition = "Cold"
-        condition_emoji = "🥶"
+    # Detect current season
+    current_month = datetime.now().month
+    if current_month in [6, 7, 8, 9]:
+        season = "Monsoon"
+    elif current_month in [11, 12, 1, 2]:
+        season = "Winter"
+    elif current_month in [3, 4, 5]:
+        season = "Summer"
     else:
-        condition = "Pleasant"
-        condition_emoji = "🌤️"
+        season = "Spring"
+    
+    # Determine overall condition (prioritize temperature in dry seasons)
+    if season == "Winter":
+        # Winter: prioritize temperature, rain is rare
+        if avg_temp < 10:
+            condition = "Very Cold"
+            condition_emoji = "❄️"
+        elif avg_temp < 18:
+            condition = "Cold & Pleasant"
+            condition_emoji = "🥶"
+        elif total_rainfall > 20:  # Higher threshold for winter
+            condition = "Unexpected Rain"
+            condition_emoji = "🌧️"
+        else:
+            condition = "Pleasant Winter Day"
+            condition_emoji = "☀️"
+    elif season == "Summer":
+        # Summer: heat is primary concern
+        if avg_temp > 40:
+            condition = "Extreme Heat"
+            condition_emoji = "🔥"
+        elif avg_temp > 35:
+            condition = "Very Hot"
+            condition_emoji = "🌡️"
+        elif total_rainfall > 10:
+            condition = "Hot with Rain"
+            condition_emoji = "🌦️"
+        else:
+            condition = "Warm & Dry"
+            condition_emoji = "☀️"
+    elif season == "Monsoon":
+        # Monsoon: rain is expected
+        if total_rainfall > 50:
+            condition = "Heavy Monsoon Rain"
+            condition_emoji = "🌧️"
+        elif total_rainfall > 20:
+            condition = "Moderate Rain"
+            condition_emoji = "🌦️"
+        elif total_rainfall > 5:
+            condition = "Light Showers"
+            condition_emoji = "☔"
+        else:
+            condition = "Dry Spell"
+            condition_emoji = "🌤️"
+    else:
+        # Spring: balanced
+        if total_rainfall > 30:
+            condition = "Rainy"
+            condition_emoji = "🌧️"
+        elif avg_temp > 30:
+            condition = "Warm"
+            condition_emoji = "🌤️"
+        elif avg_temp < 15:
+            condition = "Cool"
+            condition_emoji = "🥶"
+        else:
+            condition = "Pleasant"
+            condition_emoji = "😊"
     
     profession = user_context.profession
     context = user_context.additional_context or {}
     
+    # Extract user planning details
+    planned_activity = context.get('planned_activity', '')
+    activity_time = context.get('activity_time', '')
+    duration = context.get('duration', '')
+    concerns = context.get('specific_concerns', '')
+    location_type = context.get('location_type', 'City')
+    village = context.get('village', '')
+    district = context.get('district', '')
+    
     # Build comprehensive weather analysis prompt
-    prompt = f"""You are Mausam-Vaani, an expert AI weather advisor for India. Analyze this weather data and provide personalized, actionable advice.
+    prompt = f"""You are Mausam-Vaani, a friendly AI weather advisor for India 🇮🇳. Provide warm, personalized advice in a conversational tone.
 
 📍 LOCATION: {location}
+{f"🏘️ Village: {village}, District: {district}" if village else f"🏛️ District/City: {district}" if district else ""}
+{f"📌 Hyperlocal Precision: Village-level weather analysis" if location_type == 'Village' else ""}
 
-🌡️ CURRENT WEATHER CONDITIONS (Real-Time):
-- Temperature: {current_temp:.1f}°C
-- Humidity: {current_humidity:.0f}%
-- Wind Speed: {current_wind:.1f} km/h
-- Rainfall: {current_rainfall:.1f} mm/h
-- Pressure: {current_pressure:.0f} hPa
-- Cloud Cover: {current_cloud:.0f}%
+🌍 SEASON: {season}
 
-📊 AI MODEL PREDICTIONS (Next 24 Hours):
-- Overall Condition: {condition_emoji} {condition}
-- Temperature Range: {min_temp:.1f}°C to {max_temp:.1f}°C (Avg: {avg_temp:.1f}°C)
-- Temperature Trend: {temp_trend}
-- Total Expected Rainfall: {total_rainfall:.1f} mm
-- Average Humidity: {avg_humidity:.0f}%
-- Average Wind Speed: {avg_wind:.1f} km/h
+🌡️ CURRENT CONDITIONS (Right Now):
+• Temperature: {current_temp:.1f}°C
+• Feels Like: {current_temp + (current_humidity - 50) * 0.1:.1f}°C (humidity adjusted)
+• Humidity: {current_humidity:.0f}%
+• Wind: {current_wind:.1f} km/h
+• Rainfall: {current_rainfall:.1f} mm/h {"☔ (Raining now!)" if current_rainfall > 0 else "✅ (No rain)"}
+• Pressure: {current_pressure:.0f} hPa
+• Cloud Cover: {current_cloud:.0f}% {"☁️" if current_cloud > 70 else "🌤️" if current_cloud > 30 else "☀️"}
 
-👤 USER PROFILE:
-- Profession: {profession}
-- Location: {location}
-"""
-    
-    if context:
-        prompt += "\n🔍 ADDITIONAL CONTEXT:\n"
-        for key, value in context.items():
-            prompt += f"- {key}: {value}\n"
-    
-    # Profession-specific instructions with detailed guidance
-    profession_instructions = {
-        'Farmer': """
+📊 AI PREDICTIONS (Next Hours):
+• Condition: {condition_emoji} {condition}
+• Temperature: {min_temp:.1f}°C to {max_temp:.1f}°C (Trend: {temp_trend})
+• Expected Rainfall: {total_rainfall:.1f} mm {"(Typical for monsoon)" if season == "Monsoon" else "(Rare for this season)" if total_rainfall > 5 and season == "Winter" else ""}
+• Humidity: {avg_humidity:.0f}%
+• Wind: {avg_wind:.1f} km/h
 
-🌾 TASK: Provide actionable farming advice (3-4 sentences):
-1. Analyze current weather + predictions for crop impact
-2. Recommend optimal timing for activities (irrigation, spraying, harvesting, sowing)
-3. Warn about pest/disease risks based on humidity, rainfall, temperature
-4. Suggest protective measures for crops and equipment
-5. Use emojis and be specific with timing (morning/afternoon/evening)""",
-        
-        'Commuter': """
+👤 ABOUT YOU:
+• Role/Occupation: {profession}
+{f"• Planned Activity: {planned_activity}" if planned_activity else ""}
+{f"• When: {activity_time}" if activity_time else ""}
+{f"• Duration: {duration}" if duration else ""}
+{f"• Your Concerns: {concerns}" if concerns else ""}
 
-🚗 TASK: Provide travel safety advice (3-4 sentences):
-1. Analyze weather impact on roads and traffic
-2. Recommend best travel times and routes
-3. List essential items to carry (umbrella, raincoat, etc.)
-4. Warn about visibility, flooding, or slippery road risks
-5. Use emojis and be specific with timing""",
-        
-        'Construction Worker': """
+💡 YOUR TASK:
+Provide friendly, actionable weather advice specifically for this person's situation. Consider:
+1. Current SEASON ({season}) - don't over-emphasize rain if it's winter/summer dry season
+2. Their location (hyperlocal village or city)
+3. Their planned activity and timing
+4. Current weather + upcoming changes
+5. Any specific concerns they mentioned
 
-👷 TASK: Provide construction safety advice (3-4 sentences):
-1. Analyze weather safety for outdoor work
-2. Recommend work schedule adjustments (safe hours, breaks needed)
-3. Warn about heat stress, lightning, strong winds, or rain delays
-4. Suggest material protection and safety equipment needed
-5. Use emojis and be specific with timing""",
-        
-        'Outdoor Sports': """
+Write in a warm, conversational tone like talking to a friend. Use emojis naturally. Be specific about timing and practical actions.
 
-⚽ TASK: Provide outdoor activity advice (3-4 sentences):
-1. Analyze weather suitability for outdoor sports
-2. Recommend best activity windows and breaks
-3. Warn about heat exhaustion, dehydration, lightning, or poor visibility
-4. Suggest hydration, sun protection, and safety gear
-5. Use emojis and be specific with timing""",
-        
-        'General': """
+IMPORTANT: If total rainfall is less than 2mm and it's winter/summer, DON'T focus on rain - talk about temperature, wind, sun, or other relevant factors instead!
 
-🌈 TASK: Provide general weather guidance (3-4 sentences):
-1. Summarize what to expect in next 24 hours
-2. Recommend what to wear and carry
-3. Suggest activity planning tips
-4. Warn about any health or safety concerns
-5. Use emojis and be friendly and helpful"""
-    }
-    
-    instruction = profession_instructions.get(profession, profession_instructions['General'])
-    prompt += instruction
-    prompt += """\n
-📝 OUTPUT FORMAT:
-Provide 3-4 clear, actionable sentences with emojis. Be specific, practical, and professional.
-Focus on safety, timing, and preparation. Use Indian context and units (°C, km/h, mm).
-"""
+Format your response as:
+[Greeting + Weather Overview] → [Specific Recommendations] → [Safety/Tips] → [Encouragement]
+
+Keep it 3-4 sentences, friendly and helpful!"""
     
     return prompt
 
@@ -667,6 +687,11 @@ def fetch_weather_data_from_openweather(location_name: str) -> Dict:
         base_pressure = current_weather['pressure']
         base_cloud = current_weather['cloud_cover']
         
+        # Seasonal awareness
+        current_month = datetime.now().month
+        is_monsoon = current_month in [6, 7, 8, 9]
+        is_winter = current_month in [11, 12, 1, 2]
+        
         for hour in range(168):
             hour_of_day = (datetime.now().hour - (168 - hour)) % 24
             
@@ -676,7 +701,15 @@ def fetch_weather_data_from_openweather(location_name: str) -> Dict:
             
             humidity = max(30, min(95, base_humidity - temp_variation * 2 + np.random.randn() * 5))
             wind_speed = max(0, base_wind + np.random.randn() * 2)
-            rainfall = max(0, np.random.randn() * 2) if np.random.rand() > 0.85 else 0
+            
+            # Seasonal rainfall
+            if is_monsoon:
+                rainfall = max(0, np.random.randn() * 4) if np.random.rand() > 0.70 else 0
+            elif is_winter:
+                rainfall = max(0, np.random.randn() * 0.3) if np.random.rand() > 0.96 else 0
+            else:
+                rainfall = max(0, np.random.randn() * 2) if np.random.rand() > 0.90 else 0
+            
             pressure = base_pressure + np.random.randn() * 3
             cloud = max(0, min(100, base_cloud + np.random.randn() * 15))
             
@@ -804,6 +837,12 @@ def generate_realistic_dummy_prediction(input_data: np.ndarray, forecast_hours: 
     base_pressure = last_values[4] if len(last_values) > 4 else 1010.0
     base_cloud = last_values[5] if len(last_values) > 5 else 50.0
     
+    # Seasonal awareness (simple heuristic based on current month)
+    current_month = datetime.now().month
+    # Monsoon: Jun-Sep (6-9), Winter: Nov-Feb (11,12,1,2), Summer: Mar-May (3-5)
+    is_monsoon = current_month in [6, 7, 8, 9]
+    is_winter = current_month in [11, 12, 1, 2]
+    
     predictions = []
     for hour in range(forecast_hours):
         # Add realistic variations
@@ -819,14 +858,22 @@ def generate_realistic_dummy_prediction(input_data: np.ndarray, forecast_hours: 
         # Wind speed: varies slightly
         wind = max(0, base_wind + np.random.randn() * 2)
         
-        # Rainfall: occasional rain
-        rainfall = max(0, np.random.randn() * 3) if np.random.rand() > 0.85 else 0
+        # Rainfall: seasonal and realistic
+        if is_monsoon:
+            # Monsoon: higher chance, more rain
+            rainfall = max(0, np.random.randn() * 5) if np.random.rand() > 0.70 else 0
+        elif is_winter:
+            # Winter: very rare rain, minimal amounts
+            rainfall = max(0, np.random.randn() * 0.5) if np.random.rand() > 0.95 else 0
+        else:
+            # Summer/Spring: occasional light rain
+            rainfall = max(0, np.random.randn() * 2) if np.random.rand() > 0.90 else 0
         
         # Pressure: slight variations
         pressure = base_pressure + np.random.randn() * 2
         
-        # Cloud cover: correlated with rainfall
-        cloud = min(100, max(0, base_cloud + (rainfall * 5) + np.random.randn() * 15))
+        # Cloud cover: loosely correlated with rainfall, but not extreme
+        cloud = min(100, max(0, base_cloud + (rainfall * 3) + np.random.randn() * 10))
         
         predictions.append([temp, humidity, wind, rainfall, pressure, cloud])
     
