@@ -1,0 +1,36 @@
+# Ignore unnecessary files for deployment
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.env
+.env.local
+.venv/
+venv/
+ENV/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Model files (too large for Vercel, will generate dummy predictions)
+models/*.pth
+models/*.pt
+*.pkl
+
+# Development files
+.git/
+.gitignore
+.vscode/
+*.md
+colab/
+test_*.py

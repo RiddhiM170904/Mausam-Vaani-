@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "app.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "app.py"
+    }
+  ],
+  "env": {
+    "GEMINI_API_KEY": "@gemini_api_key",
+    "OPENWEATHER_API_KEY": "@openweather_api_key"
+  },
+  "functions": {
+    "app.py": {
+      "memory": 3008,
+      "maxDuration": 60
+    }
+  }
+}
