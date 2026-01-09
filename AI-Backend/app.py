@@ -14,6 +14,7 @@ Just run: uvicorn app:app --reload
 
 import os
 import sys
+import json
 import pickle
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
@@ -53,7 +54,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Model configuration
-MODEL_PATH = os.getenv('MODEL_PATH', 'best_model.pth')
+MODEL_PATH = os.getenv('MODEL_PATH', 'fast_weather_model.pth')  # or 'best_weather_model.pth'
+MODEL_TYPE = os.getenv('MODEL_TYPE', 'fast')  # 'fast' or 'slow'
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
 
@@ -62,36 +64,62 @@ if not GEMINI_API_KEY:
 if not OPENWEATHER_API_KEY:
     logger.warning("⚠️ OPENWEATHER_API_KEY not found in environment variables!")
 
-# Model parameters (must match training config)
+# Model parameters - will be auto-detected from checkpoint
 MODEL_CONFIG = {
-    'num_features': 9,  # Will be updated when loading model
-    'hidden_dim': 128,
-    'num_heads': 4,
-    'num_layers': 2,
-    'forecast_horizon': 24,
-    'output_dim': 6,  # Will be updated when loading model
-    'dropout': 0.1,
+    'fast': {
+        'num_features': 20,
+        'hidden_dim': 128,
+        'num_heads': 4,
+        'num_layers': 2,
+        'forecast_horizon': 12,  # Base trained length, can predict more
+        'output_dim': 13,
+        'dropout': 0.1,
+        'encoder_steps': 72,
+    },
+    'slow': {
+        'num_features': 23,
+        'hidden_dim': 256,
+        'num_heads': 8,
+        'num_layers': 3,
+        'forecast_horizon': 24,  # Base trained length, can predict more
+        'output_dim': 13,
+        'dropout': 0.15,
+        'encoder_steps': 168,
+    }
 }
 
 # Try to load model metadata if available
-METADATA_PATH = os.getenv('METADATA_PATH', 'model_metadata.pkl')
+METADATA_PATH = os.getenv('METADATA_PATH', 'fast_model_metadata.pkl')  # or 'model_metadata.pkl'
 model_metadata = None
+input_features = []
+target_features = []
+
 if os.path.exists(METADATA_PATH):
     try:
         with open(METADATA_PATH, 'rb') as f:
             model_metadata = pickle.load(f)
         logger.info(f"✓ Loaded model metadata from {METADATA_PATH}")
-        # Update MODEL_CONFIG from metadata
-        if 'model_config' in model_metadata:
-            MODEL_CONFIG.update(model_metadata['model_config'])
-        if 'num_features' in model_metadata:
-            MODEL_CONFIG['num_features'] = model_metadata['num_features']
-        if 'num_targets' in model_metadata:
-            MODEL_CONFIG['output_dim'] = model_metadata['num_targets']
-        logger.info(f"  Features: {model_metadata.get('feature_cols', 'N/A')}")
-        logger.info(f"  Targets: {model_metadata.get('target_cols', 'N/A')}")
+        input_features = model_metadata.get('input_features', [])
+        target_features = model_metadata.get('target_features', [])
+        logger.info(f"  Input features ({len(input_features)}): {input_features}")
+        logger.info(f"  Target features ({len(target_features)}): {target_features}")
     except Exception as e:
         logger.warning(f"⚠️ Could not load metadata: {e}")
+
+# Fallback feature definitions if metadata not available
+if not input_features:
+    input_features = [
+        'temperature', 'humidity', 'wind_speed', 'rainfall',
+        'pressure', 'cloud_cover', 'aqi', 'pm25', 'pm10',
+        'co', 'no2', 'o3', 'so2', 'latitude', 'longitude',
+        'hour_sin', 'hour_cos', 'day_of_week', 'month', 'is_weekend'
+    ]
+if not target_features:
+    target_features = [
+        'temperature', 'humidity', 'wind_speed', 'rainfall',
+        'pressure', 'cloud_cover', 'aqi', 'pm25', 'pm10',
+        'co', 'no2', 'o3', 'so2'
+    ]
 
 # ============================================================================
 # GLOBAL MODEL INSTANCE AND DEVICE
@@ -120,18 +148,28 @@ def load_model():
             return False
         
         # Create model instance
+        config = MODEL_CONFIG[MODEL_TYPE]
         weather_model = TemporalFusionTransformer(
-            num_features=MODEL_CONFIG['num_features'],
-            hidden_dim=MODEL_CONFIG['hidden_dim'],
-            num_heads=MODEL_CONFIG['num_heads'],
-            num_layers=MODEL_CONFIG['num_layers'],
-            forecast_horizon=MODEL_CONFIG['forecast_horizon'],
-            output_dim=MODEL_CONFIG['output_dim'],
-            dropout=MODEL_CONFIG['dropout']
+            num_features=config['num_features'],
+            hidden_dim=config['hidden_dim'],
+            num_heads=config['num_heads'],
+            num_layers=config['num_layers'],
+            forecast_horizon=config['forecast_horizon'],
+            output_dim=config['output_dim'],
+            dropout=config['dropout']
         ).to(device)
         
         # Load weights
-        state_dict = torch.load(MODEL_PATH, map_location=device)
+        checkpoint = torch.load(MODEL_PATH, map_location=device)
+        
+        # Handle different checkpoint formats
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            # Training checkpoint format
+            state_dict = checkpoint['model_state_dict']
+            logger.info(f"Loading from training checkpoint (epoch {checkpoint.get('epoch', 'unknown')})")
+        else:
+            # Raw model state dict
+            state_dict = checkpoint
 
         try:
             weather_model.load_state_dict(state_dict)
@@ -224,89 +262,76 @@ app.add_middleware(
 )
 
 # ============================================================================
-# TFT MODEL DEFINITION (Same as training)
+# TFT MODEL DEFINITION (Must match training script)
 # ============================================================================
 
-class GatedResidualNetwork(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.1):
-        super().__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, output_dim)
-        self.dropout = nn.Dropout(dropout)
-        self.gate = nn.Linear(hidden_dim, output_dim)
-        self.layer_norm = nn.LayerNorm(output_dim)
-        self.skip = nn.Linear(input_dim, output_dim) if input_dim != output_dim else None
+class SimpleTFT(nn.Module):
+    """Fast, simplified Temporal Fusion Transformer (from colab_fast_train.py)"""
     
-    def forward(self, x):
-        h = F.elu(self.fc1(x))
-        h = self.dropout(h)
-        h = self.fc2(h)
-        gate = torch.sigmoid(self.gate(F.elu(self.fc1(x))))
-        h = h * gate
-        if self.skip is not None:
-            x = self.skip(x)
-        return self.layer_norm(x + h)
-
-class VariableSelectionNetwork(nn.Module):
-    def __init__(self, input_dim, num_features, hidden_dim, dropout=0.1):
-        super().__init__()
-        self.num_features = num_features
-        self.grns = nn.ModuleList([
-            GatedResidualNetwork(input_dim, hidden_dim, hidden_dim, dropout)
-            for _ in range(num_features)
-        ])
-        self.grn_combine = GatedResidualNetwork(
-            num_features * hidden_dim, hidden_dim, hidden_dim, dropout
-        )
-    
-    def forward(self, x):
-        batch_size = x.size(0)
-        processed = [grn(x[:, i, :]) for i, grn in enumerate(self.grns)]
-        processed = torch.stack(processed, dim=1)
-        flattened = processed.view(batch_size, -1)
-        combined = self.grn_combine(flattened)
-        return combined, processed
-
-class TemporalFusionTransformer(nn.Module):
-    def __init__(self, num_features=9, hidden_dim=128, num_heads=4, num_layers=2, 
-                 forecast_horizon=24, output_dim=6, dropout=0.1):
+    def __init__(self, num_features, hidden_dim, num_heads, num_layers,
+                 forecast_horizon, output_dim, dropout=0.1):
         super().__init__()
         self.num_features = num_features
         self.hidden_dim = hidden_dim
         self.forecast_horizon = forecast_horizon
-        self.output_dim = output_dim
         
-        self.vsn = VariableSelectionNetwork(1, num_features, hidden_dim, dropout)
-        self.encoder_lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers, batch_first=True, 
-                                     dropout=dropout if num_layers > 1 else 0)
-        self.decoder_lstm = nn.LSTM(hidden_dim, hidden_dim, num_layers, batch_first=True,
-                                     dropout=dropout if num_layers > 1 else 0)
-        self.attention = nn.MultiheadAttention(hidden_dim, num_heads, dropout=dropout, batch_first=True)
-        self.grn_post_attention = GatedResidualNetwork(hidden_dim, hidden_dim, hidden_dim, dropout)
-        self.fc_out = nn.ModuleList([nn.Linear(hidden_dim, 1) for _ in range(output_dim)])
+        # Input projection
+        self.input_proj = nn.Linear(num_features, hidden_dim)
+        
+        # Encoder LSTM (unidirectional for speed)
+        self.encoder_lstm = nn.LSTM(
+            hidden_dim, hidden_dim, num_layers,
+            batch_first=True, dropout=dropout if num_layers > 1 else 0
+        )
+        
+        # Decoder LSTM
+        self.decoder_lstm = nn.LSTM(
+            hidden_dim, hidden_dim, num_layers,
+            batch_first=True, dropout=dropout if num_layers > 1 else 0
+        )
+        
+        # Self-attention
+        self.self_attention = nn.MultiheadAttention(
+            hidden_dim, num_heads, dropout=dropout, batch_first=True
+        )
+        
+        # Output layers
+        self.output_gate = nn.Linear(hidden_dim, hidden_dim)
+        self.output_proj = nn.Linear(hidden_dim, output_dim)
+        
         self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(hidden_dim)
     
-    def forward(self, x, encoder_steps=168, forecast_steps=24):
+    def forward(self, x, encoder_steps=72, forecast_steps=12):
         batch_size = x.size(0)
-        encoder_outputs = []
         
-        for t in range(encoder_steps):
-            step_input = x[:, t, :].unsqueeze(-1)
-            selected, _ = self.vsn(step_input)
-            encoder_outputs.append(selected)
+        # Project input
+        x = self.input_proj(x)
         
-        encoder_outputs = torch.stack(encoder_outputs, dim=1)
-        encoder_out, (h_n, c_n) = self.encoder_lstm(encoder_outputs)
-        decoder_input = encoder_out[:, -1:, :].repeat(1, forecast_steps, 1)
-        decoder_out, _ = self.decoder_lstm(decoder_input, (h_n, c_n))
-        attn_out, _ = self.attention(decoder_out, encoder_out, encoder_out)
-        attn_out = self.grn_post_attention(attn_out.reshape(-1, self.hidden_dim))
-        attn_out = attn_out.reshape(batch_size, forecast_steps, self.hidden_dim)
+        # Encode historical data
+        encoder_input = x[:, :encoder_steps, :]
+        encoded, (h, c) = self.encoder_lstm(encoder_input)
         
-        predictions = [fc(attn_out) for fc in self.fc_out]
-        predictions = torch.cat(predictions, dim=-1)
+        # Self-attention on encoder output
+        attn_out, _ = self.self_attention(encoded, encoded, encoded)
+        encoded = self.layer_norm(encoded + attn_out)
+        
+        # Decode future
+        decoder_input = torch.zeros(batch_size, forecast_steps, self.hidden_dim).to(x.device)
+        decoded, _ = self.decoder_lstm(decoder_input, (h, c))
+        
+        # Gated output
+        gate = torch.sigmoid(self.output_gate(decoded))
+        output = decoded * gate
+        output = self.dropout(output)
+        
+        # Final projection
+        predictions = self.output_proj(output)
         
         return predictions
+
+# Alias for compatibility
+TemporalFusionTransformer = SimpleTFT
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -365,17 +390,29 @@ class PredictionRequest(BaseModel):
     
     weather_input: WeatherInput
     user_context: UserContext
-    forecast_hours: int = Field(24, description="Number of hours to forecast", ge=1, le=72)
+    forecast_hours: int = Field(24, description="Number of hours to forecast (frontend controlled)", ge=1)
 
 class WeatherPrediction(BaseModel):
-    """Weather prediction output"""
+    """Weather prediction output with all parameters"""
     timestamp: str
     temperature: float
     humidity: float
     wind_speed: float
     rainfall: float
-    pressure: Optional[float] = None
-    cloud_cover: Optional[float] = None
+    pressure: float
+    cloud_cover: float
+    aqi: Optional[float] = None
+    pm25: Optional[float] = None
+    pm10: Optional[float] = None
+    co: Optional[float] = None
+    no2: Optional[float] = None
+    o3: Optional[float] = None
+    so2: Optional[float] = None
+    sunrise: Optional[str] = None
+    sunset: Optional[str] = None
+    moonrise: Optional[str] = None
+    moonset: Optional[str] = None
+    moon_phase: Optional[str] = None
 
 class InsightResponse(BaseModel):
     """Complete API response"""
@@ -384,10 +421,13 @@ class InsightResponse(BaseModel):
     longitude: float
     current_time: str
     forecast_hours: int
-    predictions: List[WeatherPrediction]
+    current_weather: Dict  # Real-time data from OpenWeather
+    predictions: List[WeatherPrediction]  # AI predictions refined by Gemini
     summary: Dict[str, float]  # avg, min, max for key metrics
     personalized_insight: str
     profession: str
+    model_used: str  # 'fast' or 'slow'
+    data_source: str  # 'model' or 'demo'
 
 # ============================================================================
 # GEMINI LLM INTEGRATION
@@ -445,7 +485,7 @@ def build_gemini_prompt(weather_data: Dict, user_context: UserContext) -> str:
     avg_wind = summary['avg_wind_speed']
     
     # Analyze trends from predictions
-    temps = [p.temperature for p in predictions[:6]] if predictions else [avg_temp]
+    temps = [p['temperature'] if isinstance(p, dict) else p.temperature for p in predictions[:6]] if predictions else [avg_temp]
     temp_trend = "rising" if temps[-1] > temps[0] else "falling" if temps[-1] < temps[0] else "stable"
     
     # Detect current season
@@ -628,7 +668,7 @@ def generate_fallback_insight(weather_data: Dict, user_context: UserContext) -> 
 # HELPER FUNCTIONS
 # ============================================================================
 
-def fetch_weather_data_from_openweather(location_name: str) -> Dict:
+def fetch_openweather_data(lat: float, lon: float, location_name: str = None) -> Dict:
     """
     Fetch real-time and forecast weather data from OpenWeatherMap API
     Returns historical-like data + current conditions + coordinates
@@ -638,21 +678,19 @@ def fetch_weather_data_from_openweather(location_name: str) -> Dict:
         return None
     
     try:
-        # Get coordinates from location name using Geocoding API
-        geo_url = f"http://api.openweathermap.org/geo/1.0/direct?q={location_name}&limit=1&appid={OPENWEATHER_API_KEY}"
-        geo_response = requests.get(geo_url, timeout=10)
-        geo_response.raise_for_status()
-        geo_data = geo_response.json()
+        # Use provided lat/lon from frontend (captured location)
+        logger.info(f"Fetching weather for coordinates: ({lat}, {lon})")
         
-        if not geo_data:
-            logger.warning(f"Location '{location_name}' not found")
-            return None
+        # Get location name from reverse geocoding if not provided
+        if not location_name:
+            geo_url = f"http://api.openweathermap.org/geo/1.0/reverse?lat={lat}&lon={lon}&limit=1&appid={OPENWEATHER_API_KEY}"
+            geo_response = requests.get(geo_url, timeout=10)
+            geo_response.raise_for_status()
+            geo_data = geo_response.json()
+            location_name = geo_data[0].get('name', f"Lat:{lat}, Lon:{lon}") if geo_data else f"Lat:{lat}, Lon:{lon}"
         
-        lat = geo_data[0]['lat']
-        lon = geo_data[0]['lon']
-        actual_name = geo_data[0].get('name', location_name)
-        
-        logger.info(f"Found location: {actual_name} ({lat}, {lon})")
+        actual_name = location_name
+        logger.info(f"Location: {actual_name} ({lat}, {lon})")
         
         # Get current weather + 5 day/3 hour forecast
         forecast_url = f"http://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={OPENWEATHER_API_KEY}&units=metric"
@@ -666,6 +704,12 @@ def fetch_weather_data_from_openweather(location_name: str) -> Dict:
         current_response.raise_for_status()
         current_data = current_response.json()
         
+        # Get astronomical data (sunrise, sunset)
+        sunrise_ts = current_data['sys'].get('sunrise', 0)
+        sunset_ts = current_data['sys'].get('sunset', 0)
+        sunrise_time = datetime.fromtimestamp(sunrise_ts).strftime('%H:%M') if sunrise_ts else 'N/A'
+        sunset_time = datetime.fromtimestamp(sunset_ts).strftime('%H:%M') if sunset_ts else 'N/A'
+        
         # Build historical-like data from current + forecast
         historical_data = []
         
@@ -677,6 +721,9 @@ def fetch_weather_data_from_openweather(location_name: str) -> Dict:
             'rainfall': current_data.get('rain', {}).get('1h', 0),
             'pressure': current_data['main']['pressure'],
             'cloud_cover': current_data['clouds']['all'],
+            'sunrise': sunrise_time,
+            'sunset': sunset_time,
+            'description': current_data['weather'][0].get('description', 'Unknown'),
         }
         
         # Create 168 hours of synthetic historical data based on current conditions
@@ -776,12 +823,12 @@ def create_dummy_historical_data(lat: float, lon: float) -> np.ndarray:
     
     return np.array(data)
 
-def make_prediction(input_data: np.ndarray, forecast_hours: int = 24) -> np.ndarray:
-    """Make weather prediction using the TFT model"""
+def make_prediction(input_data: np.ndarray, forecast_hours: int) -> np.ndarray:
+    """Make weather prediction using the TFT model for any number of hours"""
     
     # If model is not loaded, use realistic dummy predictions
     if weather_model is None:
-        logger.info("Using dummy data for prediction (model not loaded)")
+        logger.info(f"Using dummy data for {forecast_hours}h prediction (model not loaded)")
         try:
             logger.debug(f"Input data shape: {getattr(input_data, 'shape', None)}")
             last_vals = input_data[-1] if len(input_data) > 0 else None
@@ -791,9 +838,9 @@ def make_prediction(input_data: np.ndarray, forecast_hours: int = 24) -> np.ndar
         return generate_realistic_dummy_prediction(input_data, forecast_hours)
     
     try:
-        # Prepare input
-        # Input shape: (batch=1, total_steps=168+forecast_hours, num_features=9)
-        encoder_steps = 168
+        # Use encoder steps from model config
+        config = MODEL_CONFIG[MODEL_TYPE]
+        encoder_steps = config['encoder_steps']
         total_steps = encoder_steps + forecast_hours
         
         # Pad or trim input data
@@ -886,6 +933,85 @@ def generate_realistic_dummy_prediction(input_data: np.ndarray, forecast_hours: 
     return preds
 
 
+def refine_predictions_with_gemini(model_predictions: List[Dict], current_weather: Dict, location: str, lat: float, lon: float) -> List[Dict]:
+    """
+    Send model predictions + real-time data to Gemini for refinement
+    Returns refined exact values for all weather parameters including AQI
+    """
+    if not GEMINI_API_KEY:
+        logger.warning("Gemini API not configured, using raw predictions")
+        return model_predictions
+    
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # Build refinement prompt
+        prompt = f"""You are a meteorological AI assistant. You have:
+
+1. CURRENT REAL-TIME DATA (from OpenWeather API) for {location} ({lat}, {lon}):
+   - Temperature: {current_weather.get('temp', 'N/A')}°C
+   - Humidity: {current_weather.get('humidity', 'N/A')}%
+   - Wind Speed: {current_weather.get('wind_speed', 'N/A')} km/h
+   - Pressure: {current_weather.get('pressure', 'N/A')} hPa
+   - Cloud Cover: {current_weather.get('cloud_cover', 'N/A')}%
+   - Rainfall: {current_weather.get('rainfall', 0)} mm/h
+   - Conditions: {current_weather.get('description', 'N/A')}
+
+2. AI MODEL PREDICTIONS (next {len(model_predictions)} hours):
+{chr(10).join([f"   Hour {i+1}: Temp={p.get('temperature', 25):.1f}°C, Humidity={p.get('humidity', 60):.0f}%, Rain={p.get('rainfall', 0):.1f}mm" for i, p in enumerate(model_predictions[:5])])}
+   ...
+
+TASK: Refine and correct the AI predictions using the real-time data as a baseline. Output ONLY a JSON array with realistic refined values.
+
+Each prediction should include ALL these fields (use realistic Indian weather values):
+- temperature (°C, range: -5 to 50)
+- humidity (%, range: 20-100)
+- wind_speed (km/h, range: 0-60)
+- rainfall (mm, range: 0-100)
+- pressure (hPa, range: 980-1040)
+- cloud_cover (%, range: 0-100)
+- aqi (Air Quality Index, 0-500, typical Indian cities: 100-300, rural: 50-150)
+- pm25 (μg/m³, typical: 30-150)
+- pm10 (μg/m³, typical: 50-250)
+- co (ppm, typical: 0.5-3.0)
+- no2 (ppb, typical: 20-80)
+- o3 (ppb, typical: 30-70)
+- so2 (ppb, typical: 5-40)
+
+IMPORTANT:
+- Start from current real-time values
+- Make gradual, realistic changes hour by hour
+- Consider Indian weather patterns and seasons (month: {datetime.now().month})
+- AQI should be realistic for Indian locations
+- NO explanations, ONLY valid JSON array
+
+Format:
+[
+  {{"temperature": 28.5, "humidity": 65, "wind_speed": 12.3, "rainfall": 0, "pressure": 1012, "cloud_cover": 45, "aqi": 150, "pm25": 65, "pm10": 95, "co": 1.2, "no2": 35, "o3": 42, "so2": 15}},
+  ...
+]"""
+        
+        logger.info("Sending to Gemini for prediction refinement...")
+        response = model.generate_content(prompt)
+        refined_text = response.text.strip()
+        
+        # Extract JSON from response
+        import re
+        import json
+        json_match = re.search(r'\[.*\]', refined_text, re.DOTALL)
+        if json_match:
+            refined_predictions = json.loads(json_match.group(0))
+            logger.info(f"✓ Gemini refined {len(refined_predictions)} predictions")
+            return refined_predictions[:len(model_predictions)]  # Match requested length
+        else:
+            logger.warning("Could not parse Gemini response, using raw predictions")
+            return model_predictions
+            
+    except Exception as e:
+        logger.error(f"Gemini refinement error: {e}")
+        return model_predictions
+
 # ============================================================================
 # API ENDPOINTS
 # ============================================================================
@@ -955,10 +1081,87 @@ async def model_diagnostics():
     
     return diagnostics
 
+def refine_predictions_with_gemini(model_predictions: List[Dict], current_weather: Dict, location: str, lat: float, lon: float) -> List[Dict]:
+    """
+    Send model predictions + real-time data to Gemini for refinement
+    Returns refined exact values for all weather parameters
+    """
+    if not GEMINI_API_KEY:
+        logger.warning("Gemini API not configured, using raw predictions")
+        return model_predictions
+    
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        
+        # Build refinement prompt
+        prompt = f"""You are a meteorological AI assistant. You have:
+
+1. CURRENT REAL-TIME DATA (from OpenWeather API) for {location} ({lat}, {lon}):
+   - Temperature: {current_weather.get('temp', 'N/A')}°C
+   - Humidity: {current_weather.get('humidity', 'N/A')}%
+   - Wind Speed: {current_weather.get('wind_speed', 'N/A')} km/h
+   - Pressure: {current_weather.get('pressure', 'N/A')} hPa
+   - Cloud Cover: {current_weather.get('cloud_cover', 'N/A')}%
+   - Rainfall: {current_weather.get('rainfall', 0)} mm/h
+
+2. AI MODEL PREDICTIONS (next {len(model_predictions)} hours):
+{chr(10).join([f"   Hour {i+1}: Temp={p['temperature']:.1f}°C, Humidity={p['humidity']:.0f}%, Rain={p.get('rainfall', 0):.1f}mm" for i, p in enumerate(model_predictions[:5])])}
+   ...
+
+TASK: Refine and correct the AI predictions using the real-time data as a baseline. Output ONLY a JSON array with refined values.
+
+Each prediction should include ALL these fields (use realistic Indian weather values):
+- temperature (°C)
+- humidity (%)
+- wind_speed (km/h)
+- rainfall (mm)
+- pressure (hPa)
+- cloud_cover (%)
+- aqi (Air Quality Index, 0-500)
+- pm25 (μg/m³)
+- pm10 (μg/m³)
+- co (ppm)
+- no2 (ppb)
+- o3 (ppb)
+- so2 (ppb)
+
+IMPORTANT:
+- Start from current real-time values
+- Make gradual, realistic changes hour by hour
+- Consider Indian weather patterns and seasons
+- AQI should be realistic for Indian cities (typically 100-300 in cities, 50-100 in rural areas)
+- Output ONLY valid JSON array, no explanations
+
+Format:
+[
+  {{"temperature": 28.5, "humidity": 65, "wind_speed": 12.3, "rainfall": 0, "pressure": 1012, "cloud_cover": 45, "aqi": 150, "pm25": 65, "pm10": 95, "co": 1.2, "no2": 35, "o3": 42, "so2": 15}},
+  ...
+]"""
+        
+        logger.info("Sending to Gemini for prediction refinement...")
+        response = model.generate_content(prompt)
+        refined_text = response.text.strip()
+        
+        # Extract JSON from response
+        import re
+        json_match = re.search(r'\[.*\]', refined_text, re.DOTALL)
+        if json_match:
+            refined_predictions = json.loads(json_match.group(0))
+            logger.info(f"✓ Gemini refined {len(refined_predictions)} predictions")
+            return refined_predictions[:len(model_predictions)]  # Match requested length
+        else:
+            logger.warning("Could not parse Gemini response, using raw predictions")
+            return model_predictions
+            
+    except Exception as e:
+        logger.error(f"Gemini refinement error: {e}")
+        return model_predictions
+
 @app.post("/predict", response_model=InsightResponse)
 async def predict_weather(request: PredictionRequest):
     """
-    Main prediction endpoint
+    Main prediction endpoint - uses lat/lon from frontend, combines model + OpenWeather + Gemini
     
     Returns weather predictions + personalized LLM insights
     """
@@ -966,92 +1169,174 @@ async def predict_weather(request: PredictionRequest):
     try:
         logger.info(f"Prediction request for {request.weather_input.location_name}")
         
-        # Fetch real weather data from OpenWeatherMap
-        weather_data_result = fetch_weather_data_from_openweather(request.weather_input.location_name)
+        # Extract request data
+        location_input = request.weather_input
+        user_context = request.user_context
+        forecast_hours = request.forecast_hours  # Use exactly what frontend requests
         
-        current_weather = None
-        if weather_data_result:
-            # Use real data from API
-            historical_data = weather_data_result['historical_data']
-            location_name = weather_data_result['location_name']
-            latitude = weather_data_result['latitude']
-            longitude = weather_data_result['longitude']
-            current_weather = weather_data_result.get('current_weather')
-            logger.info(f"✓ Using real weather data from OpenWeatherMap for {location_name}")
+        # Use lat/lon from frontend if provided, otherwise try to get from location name
+        if location_input.latitude and location_input.longitude:
+            lat = location_input.latitude
+            lon = location_input.longitude
+            location_name = location_input.location_name
+            logger.info(f"Using provided coordinates: {lat}, {lon}")
         else:
-            # Fallback to dummy data
-            logger.warning("⚠️ Using dummy data (OpenWeather API unavailable)")
-            latitude = request.weather_input.latitude or 28.6139
-            longitude = request.weather_input.longitude or 77.2090
-            location_name = request.weather_input.location_name
-            historical_data = create_dummy_historical_data(latitude, longitude)
-        
-        # Make prediction
-        predictions = make_prediction(historical_data, request.forecast_hours)
-        
-        # Parse predictions
-        current_time = datetime.now()
-        forecast_list = []
-        
-        feature_names = ['temperature', 'humidity', 'wind_speed', 'rainfall', 'pressure', 'cloud_cover']
-        
-        for i in range(request.forecast_hours):
-            timestamp = current_time + timedelta(hours=i+1)
+            # Fallback: try to geocode from location name
+            logger.info(f"No coordinates provided, geocoding '{location_input.location_name}'...")
+            if not OPENWEATHER_API_KEY:
+                raise HTTPException(status_code=400, detail="Location coordinates required when OpenWeather API is not configured")
             
-            pred_dict = {
-                'timestamp': timestamp.isoformat(),
-                'temperature': float(predictions[i, 0]) if predictions.shape[1] > 0 else 25.0,
-                'humidity': float(predictions[i, 1]) if predictions.shape[1] > 1 else 60.0,
-                'wind_speed': float(predictions[i, 2]) if predictions.shape[1] > 2 else 5.0,
-                'rainfall': float(predictions[i, 3]) if predictions.shape[1] > 3 else 0.0,
-                'pressure': float(predictions[i, 4]) if predictions.shape[1] > 4 else 1010.0,
-                'cloud_cover': float(predictions[i, 5]) if predictions.shape[1] > 5 else 50.0,
+            geo_url = f"http://api.openweathermap.org/geo/1.0/direct?q={location_input.location_name}&limit=1&appid={OPENWEATHER_API_KEY}"
+            geo_response = requests.get(geo_url, timeout=10)
+            geo_response.raise_for_status()
+            geo_data = geo_response.json()
+            
+            if not geo_data:
+                raise HTTPException(status_code=404, detail=f"Location '{location_input.location_name}' not found")
+            
+            lat = geo_data[0]['lat']
+            lon = geo_data[0]['lon']
+            location_name = geo_data[0].get('name', location_input.location_name)
+        
+        # Step 1: Fetch real-time data from OpenWeather API
+        logger.info(f"Step 1: Fetching real-time data for {location_name} ({lat}, {lon})...")
+        weather_data = fetch_openweather_data(lat, lon, location_name)
+        
+        if not weather_data:
+            logger.warning("OpenWeather unavailable, using dummy data")
+            # Create dummy data
+            historical_input = create_dummy_historical_data(lat, lon)
+            current_weather = {
+                'temp': 25.0,
+                'humidity': 60.0,
+                'wind_speed': 10.0,
+                'rainfall': 0.0,
+                'pressure': 1012.0,
+                'cloud_cover': 50.0,
+                'sunrise': '06:00',
+                'sunset': '18:00',
+                'description': 'Clear sky'
             }
-            
-            forecast_list.append(WeatherPrediction(**pred_dict))
+            location_name = location_input.location_name or f"Lat:{lat}, Lon:{lon}"
+            data_source = "demo"
+        else:
+            historical_input = weather_data['historical_data']
+            current_weather = weather_data['current_weather']
+            location_name = weather_data['location_name']
+            lat = weather_data['latitude']
+            lon = weather_data['longitude']
+            data_source = "openweather+model"
         
-        # Calculate summary statistics
-        temps = [p.temperature for p in forecast_list]
-        rainfalls = [p.rainfall for p in forecast_list]
-        humidities = [p.humidity for p in forecast_list]
-        wind_speeds = [p.wind_speed for p in forecast_list]
+        # Step 2: Make AI model predictions
+        logger.info(f"Step 2: Making {forecast_hours}h predictions using {MODEL_TYPE} model...")
+        raw_predictions = make_prediction(historical_input, forecast_hours)
+        
+        # Convert raw predictions to dict format
+        model_predictions = []
+        for i in range(forecast_hours):
+            pred_dict = {
+                'temperature': float(raw_predictions[i, 0]) if len(raw_predictions[i]) > 0 else 25.0,
+                'humidity': float(raw_predictions[i, 1]) if len(raw_predictions[i]) > 1 else 60.0,
+                'wind_speed': float(raw_predictions[i, 2]) if len(raw_predictions[i]) > 2 else 10.0,
+                'rainfall': float(raw_predictions[i, 3]) if len(raw_predictions[i]) > 3 else 0.0,
+                'pressure': float(raw_predictions[i, 4]) if len(raw_predictions[i]) > 4 else 1012.0,
+                'cloud_cover': float(raw_predictions[i, 5]) if len(raw_predictions[i]) > 5 else 50.0,
+                'aqi': float(raw_predictions[i, 6]) if len(raw_predictions[i]) > 6 else 100.0,
+                'pm25': float(raw_predictions[i, 7]) if len(raw_predictions[i]) > 7 else 50.0,
+                'pm10': float(raw_predictions[i, 8]) if len(raw_predictions[i]) > 8 else 80.0,
+                'co': float(raw_predictions[i, 9]) if len(raw_predictions[i]) > 9 else 1.0,
+                'no2': float(raw_predictions[i, 10]) if len(raw_predictions[i]) > 10 else 30.0,
+                'o3': float(raw_predictions[i, 11]) if len(raw_predictions[i]) > 11 else 40.0,
+                'so2': float(raw_predictions[i, 12]) if len(raw_predictions[i]) > 12 else 10.0,
+            }
+            model_predictions.append(pred_dict)
+        
+        # Step 3: Refine predictions with Gemini using real-time data
+        logger.info(f"Step 3: Refining predictions with Gemini AI...")
+        refined_predictions = refine_predictions_with_gemini(
+            model_predictions, current_weather, location_name, lat, lon
+        )
+        
+        # Step 4: Create WeatherPrediction objects with timestamps and astronomical data
+        predictions = []
+        current_time = datetime.now()
+        
+        # Calculate sunrise/sunset for each hour (simplified - use current day's times)
+        sunrise = current_weather.get('sunrise', '06:00')
+        sunset = current_weather.get('sunset', '18:00')
+        
+        for i, pred in enumerate(refined_predictions):
+            forecast_time = current_time + timedelta(hours=i+1)
+            
+            # Simple moon phase calculation (approximate)
+            day_of_month = forecast_time.day
+            moon_phase = "New Moon" if day_of_month < 4 else "First Quarter" if day_of_month < 11 else "Full Moon" if day_of_month < 19 else "Last Quarter" if day_of_month < 26 else "New Moon"
+            
+            predictions.append(WeatherPrediction(
+                timestamp=forecast_time.strftime('%Y-%m-%d %H:%M'),
+                temperature=pred.get('temperature', 25.0),
+                humidity=pred.get('humidity', 60.0),
+                wind_speed=pred.get('wind_speed', 10.0),
+                rainfall=pred.get('rainfall', 0.0),
+                pressure=pred.get('pressure', 1012.0),
+                cloud_cover=pred.get('cloud_cover', 50.0),
+                aqi=pred.get('aqi', 100.0),
+                pm25=pred.get('pm25', 50.0),
+                pm10=pred.get('pm10', 80.0),
+                co=pred.get('co', 1.0),
+                no2=pred.get('no2', 30.0),
+                o3=pred.get('o3', 40.0),
+                so2=pred.get('so2', 10.0),
+                sunrise=sunrise if i == 0 else None,  # Only show for first hour
+                sunset=sunset if i == 0 else None,
+                moonrise=None,  # Would need additional API call
+                moonset=None,
+                moon_phase=moon_phase if i == 0 else None
+            ))
+        
+        # Step 5: Calculate summary statistics
+        temps = [p.temperature for p in predictions]
+        humidities = [p.humidity for p in predictions]
+        wind_speeds = [p.wind_speed for p in predictions]
+        rainfalls = [p.rainfall for p in predictions]
         
         summary = {
-            'avg_temperature': np.mean(temps),
-            'min_temperature': np.min(temps),
-            'max_temperature': np.max(temps),
-            'avg_rainfall': np.mean(rainfalls),
-            'total_rainfall': np.sum(rainfalls),
-            'avg_humidity': np.mean(humidities),
-            'avg_wind_speed': np.mean(wind_speeds),
+            'avg_temperature': float(np.mean(temps)),
+            'min_temperature': float(np.min(temps)),
+            'max_temperature': float(np.max(temps)),
+            'avg_humidity': float(np.mean(humidities)),
+            'avg_wind_speed': float(np.mean(wind_speeds)),
+            'total_rainfall': float(np.sum(rainfalls)),
         }
         
-        # Prepare data for LLM with current weather
-        weather_data = {
+        # Step 6: Generate personalized insight with Gemini
+        logger.info("Step 4: Generating personalized insights...")
+        weather_context = {
             'location': location_name,
             'current_weather': current_weather,
-            'summary': summary,
-            'predictions': forecast_list
+            'predictions': [p.model_dump() for p in predictions],
+            'summary': summary
         }
         
-        # Generate personalized insight using Gemini
-        logger.info("🤖 Generating AI insights with Gemini...")
-        personalized_insight = generate_gemini_insight(weather_data, request.user_context)
+        personalized_insight = generate_gemini_insight(weather_context, user_context)
         
         # Build response
         response = InsightResponse(
             location=location_name,
-            latitude=latitude,
-            longitude=longitude,
-            current_time=current_time.isoformat(),
-            forecast_hours=request.forecast_hours,
-            predictions=forecast_list,
+            latitude=lat,
+            longitude=lon,
+            current_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            forecast_hours=forecast_hours,
+            current_weather=current_weather,
+            predictions=predictions,
             summary=summary,
             personalized_insight=personalized_insight,
-            profession=request.user_context.profession
+            profession=user_context.profession,
+            model_used=MODEL_TYPE,
+            data_source=data_source
         )
         
-        logger.info(f"✓ Prediction completed successfully")
+        logger.info(f"✓ Prediction complete for {location_name}")
         return response
         
     except HTTPException:
