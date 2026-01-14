@@ -32,7 +32,7 @@ env/
 
 # Model Checkpoints & Training
 checkpoints/
-*.pth
+pth
 *.pt
 *.ckpt
 
