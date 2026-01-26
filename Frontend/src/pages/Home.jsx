@@ -1,313 +1,309 @@
-import { MapPin, Sparkles, TrendingUp, Users, Smartphone, Zap, Cloud, CloudRain, Sun, Moon, Wind } from 'lucide-react'
-import FeatureCard from '../components/FeatureCard'
-import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import { 
+  MapPin, Sparkles, TrendingUp, Users, Smartphone, Zap, 
+  Cloud, CloudRain, Sun, ArrowRight, Play, ChevronRight,
+  Wheat, Car, MessageCircle, Globe
+} from 'lucide-react'
+import { GlassCard, Button } from '../components/Shared'
 
 const Home = () => {
-  const [weatherMode, setWeatherMode] = useState('sunny') // sunny, rainy, night
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
-
-  useEffect(() => {
-    // Auto-cycle through weather modes
-    const interval = setInterval(() => {
-      setWeatherMode(prev => {
-        if (prev === 'sunny') return 'rainy'
-        if (prev === 'rainy') return 'night'
-        return 'sunny'
-      })
-    }, 10000) // Change every 10 seconds
-
-    return () => clearInterval(interval)
-  }, [])
-
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      setMousePosition({ x: e.clientX, y: e.clientY })
-    }
-    window.addEventListener('mousemove', handleMouseMove)
-    return () => window.removeEventListener('mousemove', handleMouseMove)
-  }, [])
-
   const features = [
     {
       icon: MapPin,
       title: 'Hyperlocal Forecasting',
-      description: 'Temporal Fusion Transformer (TFT) + nowcasting integration',
-      innovation: 'Street / village-scale micro-climate resolution'
+      description: 'Street & village-scale micro-climate resolution powered by AI',
+      color: 'primary',
     },
     {
       icon: Sparkles,
       title: 'Data Fusion',
-      description: 'IMD feeds + private APIs + low-cost IoT + crowdsourcing',
-      innovation: 'Robust QC & anomaly reconciliation'
+      description: 'IMD feeds + private APIs + IoT + crowdsourcing combined',
+      color: 'weather-rain',
     },
     {
       icon: TrendingUp,
       title: 'Impact Intelligence',
-      description: 'Weather → Activity / Crop / Sector outcomes',
-      innovation: 'Actionability beyond raw metrics'
+      description: 'Weather → Activity / Crop / Sector actionable outcomes',
+      color: 'weather-sunny',
     },
     {
       icon: Users,
       title: 'Personalization',
-      description: 'Gemini LLM + user metadata + predicted weather',
-      innovation: 'On-demand advisory (multi-role, multi-language)'
+      description: 'Gemini LLM powered multi-role, multi-language advisories',
+      color: 'green',
     },
     {
       icon: Smartphone,
       title: 'Accessibility',
-      description: 'Web + SMS + WhatsApp + Voice',
-      innovation: 'Inclusive reach (2G → smartphone)'
+      description: 'Web + SMS + WhatsApp + Voice for inclusive reach',
+      color: 'purple',
     },
     {
       icon: Zap,
       title: 'API Ecosystem',
-      description: 'Unified JSON advisory responses',
-      innovation: 'Government, enterprise & developer integrations'
-    }
+      description: 'Enterprise & government integration ready',
+      color: 'orange',
+    },
+  ]
+
+  const personas = [
+    { icon: Wheat, title: 'Farmers', desc: 'Crop-specific advisories', color: 'weather-sunny' },
+    { icon: Car, title: 'Commuters', desc: 'Travel & route planning', color: 'weather-rain' },
+    { icon: Globe, title: 'Businesses', desc: 'Industry insights', color: 'primary' },
+  ]
+
+  const stats = [
+    { value: '99.9%', label: 'Accuracy' },
+    { value: '10M+', label: 'Users Served' },
+    { value: '500+', label: 'Cities Covered' },
+    { value: '24/7', label: 'Live Updates' },
   ]
 
   return (
     <div className="min-h-screen">
-      {/* Hero Section with Animated Weather Background */}
-      <section className="relative py-20 px-4 sm:px-6 lg:px-8 overflow-hidden min-h-[600px]">
+      {/* Hero Section */}
+      <section className="relative min-h-[90vh] flex items-center justify-center overflow-hidden">
         {/* Animated Background */}
-        <div className={`absolute inset-0 transition-all duration-1000 ${
-          weatherMode === 'night' 
-            ? 'bg-gradient-to-br from-indigo-900 via-purple-900 to-blue-900' 
-            : weatherMode === 'rainy'
-            ? 'bg-gradient-to-br from-gray-600 via-gray-700 to-blue-800'
-            : 'bg-gradient-to-br from-sky-400 via-blue-400 to-cyan-300'
-        }`}>
+        <div className="absolute inset-0 animated-gradient" />
+        
+        {/* Floating Elements */}
+        <div className="absolute inset-0 overflow-hidden">
+          {/* Glowing orbs */}
+          <motion.div
+            className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary-500/10 rounded-full blur-3xl"
+            animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.5, 0.3] }}
+            transition={{ duration: 8, repeat: Infinity }}
+          />
+          <motion.div
+            className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-weather-rain/10 rounded-full blur-3xl"
+            animate={{ scale: [1.2, 1, 1.2], opacity: [0.4, 0.2, 0.4] }}
+            transition={{ duration: 6, repeat: Infinity }}
+          />
           
-          {/* Sun */}
-          {weatherMode === 'sunny' && (
-            <div className="absolute top-10 right-20 animate-pulse">
-              <div className="relative">
-                <Sun className="w-24 h-24 text-yellow-300 animate-spin" style={{ animationDuration: '20s' }} />
-                <div className="absolute inset-0 w-24 h-24 bg-yellow-200 rounded-full blur-xl opacity-50"></div>
-              </div>
-            </div>
-          )}
+          {/* Floating clouds */}
+          <motion.div
+            className="absolute top-20 left-10"
+            animate={{ x: [0, 100, 0], y: [0, -20, 0] }}
+            transition={{ duration: 20, repeat: Infinity }}
+          >
+            <Cloud className="w-20 h-20 text-white/5" />
+          </motion.div>
+          <motion.div
+            className="absolute bottom-40 right-20"
+            animate={{ x: [0, -80, 0], y: [0, 15, 0] }}
+            transition={{ duration: 15, repeat: Infinity }}
+          >
+            <CloudRain className="w-16 h-16 text-weather-rain/10" />
+          </motion.div>
+        </div>
 
-          {/* Moon and Stars */}
-          {weatherMode === 'night' && (
-            <>
-              <div className="absolute top-10 right-20">
-                <Moon className="w-20 h-20 text-yellow-100" />
-                <div className="absolute inset-0 w-20 h-20 bg-yellow-100 rounded-full blur-2xl opacity-30"></div>
-              </div>
-              {[...Array(30)].map((_, i) => (
-                <div
-                  key={i}
-                  className="absolute w-1 h-1 bg-white rounded-full animate-pulse"
-                  style={{
-                    top: `${Math.random() * 60}%`,
-                    left: `${Math.random() * 100}%`,
-                    animationDelay: `${Math.random() * 2}s`,
-                    animationDuration: `${2 + Math.random() * 2}s`
-                  }}
-                />
-              ))}
-            </>
-          )}
-
-          {/* Animated Clouds */}
-          {[...Array(5)].map((_, i) => (
-            <div
-              key={i}
-              className={`absolute ${weatherMode === 'night' ? 'text-indigo-800' : 'text-white'} opacity-70`}
-              style={{
-                top: `${10 + i * 15}%`,
-                left: '-10%',
-                animation: `float ${20 + i * 5}s linear infinite`,
-                animationDelay: `${i * 2}s`,
-              }}
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8 }}
+          >
+            {/* Badge */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.2 }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary-500/10 border border-primary-500/30 mb-8"
             >
-              <Cloud className="w-32 h-32" />
-            </div>
-          ))}
+              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+              <span className="text-sm text-primary-300">Powered by AI & TFT Models</span>
+            </motion.div>
 
-          {/* Rain Effect */}
-          {weatherMode === 'rainy' && (
-            <div className="absolute inset-0">
-              {[...Array(50)].map((_, i) => (
-                <div
-                  key={i}
-                  className="absolute w-0.5 bg-blue-200 opacity-40"
-                  style={{
-                    left: `${Math.random() * 100}%`,
-                    top: '-10%',
-                    height: `${20 + Math.random() * 30}px`,
-                    animation: `rain ${0.5 + Math.random() * 0.5}s linear infinite`,
-                    animationDelay: `${Math.random() * 2}s`
-                  }}
-                />
-              ))}
-              <CloudRain className="absolute top-5 left-1/4 w-16 h-16 text-gray-300 animate-bounce" style={{ animationDuration: '3s' }} />
-              <CloudRain className="absolute top-10 right-1/3 w-20 h-20 text-gray-300 animate-bounce" style={{ animationDuration: '2.5s' }} />
-            </div>
-          )}
-
-          {/* Interactive Wind Effect */}
-          <div 
-            className="absolute opacity-20"
-            style={{
-              left: `${mousePosition.x / 10}px`,
-              top: `${mousePosition.y / 10}px`,
-              transition: 'all 0.5s ease-out'
-            }}
-          >
-            <Wind className="w-40 h-40 text-white" />
-          </div>
-        </div>
-
-        {/* Weather Mode Toggle Buttons */}
-        <div className="absolute top-4 right-4 z-20 flex gap-2">
-          <button
-            onClick={() => setWeatherMode('sunny')}
-            className={`p-2 rounded-full transition-all ${weatherMode === 'sunny' ? 'bg-yellow-400 scale-110' : 'bg-white/30'}`}
-          >
-            <Sun className="w-5 h-5 text-white" />
-          </button>
-          <button
-            onClick={() => setWeatherMode('rainy')}
-            className={`p-2 rounded-full transition-all ${weatherMode === 'rainy' ? 'bg-blue-500 scale-110' : 'bg-white/30'}`}
-          >
-            <CloudRain className="w-5 h-5 text-white" />
-          </button>
-          <button
-            onClick={() => setWeatherMode('night')}
-            className={`p-2 rounded-full transition-all ${weatherMode === 'night' ? 'bg-indigo-600 scale-110' : 'bg-white/30'}`}
-          >
-            <Moon className="w-5 h-5 text-white" />
-          </button>
-        </div>
-
-        <style jsx>{`
-          @keyframes float {
-            0% {
-              transform: translateX(0) translateY(0);
-            }
-            100% {
-              transform: translateX(110vw) translateY(-20px);
-            }
-          }
-          
-          @keyframes rain {
-            0% {
-              transform: translateY(0);
-            }
-            100% {
-              transform: translateY(100vh);
-            }
-          }
-        `}</style>
-        <div className="max-w-7xl mx-auto relative z-10">
-          <div className="text-center">
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6 drop-shadow-lg animate-fadeIn">
-              Hyperlocal Weather Intelligence
-              <span className="block text-yellow-300 mt-2">For Everyone</span>
+            <h1 className="text-4xl sm:text-5xl lg:text-7xl font-display font-bold text-white mb-6 leading-tight">
+              Hyperlocal Weather
+              <br />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-400 via-weather-rain to-weather-sunny">
+                Intelligence for India
+              </span>
             </h1>
-            <p className="text-xl text-white mb-8 max-w-3xl mx-auto drop-shadow-md">
-              Empowering decisions with precise forecasts, actionable insights, and personalized advisories. 
-              From street-level precision to multi-language accessibility.
+
+            <p className="text-lg sm:text-xl text-white/60 max-w-3xl mx-auto mb-10 leading-relaxed">
+              From village-scale forecasts to personalized crop advisories. 
+              Empowering farmers, commuters, and businesses with actionable weather insights.
             </p>
+
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <button className="bg-white text-blue-600 px-8 py-4 rounded-lg hover:bg-blue-50 transition-all font-semibold text-lg shadow-2xl hover:shadow-xl hover:scale-105 transform">
-                Get Started Free
-              </button>
-              <button className="bg-blue-600/30 backdrop-blur-md text-white px-8 py-4 rounded-lg hover:bg-blue-600/50 transition-all font-semibold text-lg border-2 border-white shadow-2xl hover:scale-105 transform">
-                View Demo
-              </button>
+              <Link to="/signup">
+                <Button variant="primary" size="lg" icon={ArrowRight} iconPosition="right">
+                  Get Started Free
+                </Button>
+              </Link>
+              <Link to="/demo">
+                <Button variant="secondary" size="lg" icon={Play}>
+                  Watch Demo
+                </Button>
+              </Link>
             </div>
-          </div>
+          </motion.div>
+
+          {/* Hero Stats */}
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5, duration: 0.8 }}
+            className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-4"
+          >
+            {stats.map((stat, index) => (
+              <GlassCard key={index} className="p-4 text-center" hover>
+                <p className="text-2xl sm:text-3xl font-bold text-white neon-text">{stat.value}</p>
+                <p className="text-sm text-white/50">{stat.label}</p>
+              </GlassCard>
+            ))}
+          </motion.div>
         </div>
+
+        {/* Scroll indicator */}
+        <motion.div
+          className="absolute bottom-8 left-1/2 -translate-x-1/2"
+          animate={{ y: [0, 10, 0] }}
+          transition={{ duration: 2, repeat: Infinity }}
+        >
+          <div className="w-6 h-10 rounded-full border-2 border-white/20 flex items-start justify-center p-2">
+            <motion.div
+              className="w-1.5 h-1.5 bg-primary-400 rounded-full"
+              animate={{ y: [0, 12, 0] }}
+              transition={{ duration: 2, repeat: Infinity }}
+            />
+          </div>
+        </motion.div>
       </section>
 
-      {/* Weather Dashboard Preview */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 bg-white">
+      {/* Personas Section */}
+      <section className="py-20 px-4 sm:px-6 lg:px-8 relative">
         <div className="max-w-7xl mx-auto">
-          <div className="bg-gradient-to-br from-blue-50 to-sky-100 rounded-2xl shadow-2xl p-8 md:p-12">
-            <div className="grid md:grid-cols-3 gap-6">
-              <div className="bg-white rounded-xl p-6 shadow-md">
-                <div className="text-4xl mb-2">🌤️</div>
-                <h3 className="text-lg font-semibold text-gray-900">Current Weather</h3>
-                <p className="text-3xl font-bold text-primary-600 mt-2">28°C</p>
-                <p className="text-sm text-gray-600">Partly Cloudy</p>
-              </div>
-              <div className="bg-white rounded-xl p-6 shadow-md">
-                <div className="text-4xl mb-2">💧</div>
-                <h3 className="text-lg font-semibold text-gray-900">Precipitation</h3>
-                <p className="text-3xl font-bold text-blue-600 mt-2">30%</p>
-                <p className="text-sm text-gray-600">Light rain expected</p>
-              </div>
-              <div className="bg-white rounded-xl p-6 shadow-md">
-                <div className="text-4xl mb-2">🌾</div>
-                <h3 className="text-lg font-semibold text-gray-900">Crop Advisory</h3>
-                <p className="text-sm font-medium text-green-600 mt-2">Good for irrigation</p>
-                <p className="text-sm text-gray-600">Optimal conditions</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Core Features */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-4">
-              Core Value Proposition
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-12"
+          >
+            <h2 className="text-3xl sm:text-4xl font-display font-bold text-white mb-4">
+              Built for Everyone
             </h2>
-            <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-              Six layers of innovation delivering weather intelligence that transforms raw data into actionable insights
+            <p className="text-white/60 max-w-2xl mx-auto">
+              Personalized weather intelligence tailored to your specific needs
             </p>
-          </div>
+          </motion.div>
 
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {features.map((feature, index) => (
-              <FeatureCard key={index} {...feature} />
+          <div className="grid md:grid-cols-3 gap-6">
+            {personas.map((persona, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: index * 0.1 }}
+              >
+                <GlassCard className="p-8 text-center" hover>
+                  <div className={`w-16 h-16 mx-auto mb-4 rounded-2xl bg-${persona.color}/20 flex items-center justify-center`}>
+                    <persona.icon className={`w-8 h-8 text-${persona.color === 'primary' ? 'primary-400' : persona.color}`} />
+                  </div>
+                  <h3 className="text-xl font-semibold text-white mb-2">{persona.title}</h3>
+                  <p className="text-white/60">{persona.desc}</p>
+                </GlassCard>
+              </motion.div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Stats Section */}
-      <section className="py-16 px-4 sm:px-6 lg:px-8 bg-primary-600 text-white">
+      {/* Features Grid */}
+      <section className="py-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
-          <div className="grid md:grid-cols-4 gap-8 text-center">
-            <div>
-              <div className="text-4xl font-bold mb-2">99.9%</div>
-              <div className="text-primary-100">Accuracy</div>
-            </div>
-            <div>
-              <div className="text-4xl font-bold mb-2">10M+</div>
-              <div className="text-primary-100">Users Served</div>
-            </div>
-            <div>
-              <div className="text-4xl font-bold mb-2">500+</div>
-              <div className="text-primary-100">Cities Covered</div>
-            </div>
-            <div>
-              <div className="text-4xl font-bold mb-2">24/7</div>
-              <div className="text-primary-100">Live Updates</div>
-            </div>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-16"
+          >
+            <h2 className="text-3xl sm:text-4xl font-display font-bold text-white mb-4">
+              Core Value Proposition
+            </h2>
+            <p className="text-white/60 max-w-2xl mx-auto">
+              Six layers of innovation delivering weather intelligence that matters
+            </p>
+          </motion.div>
+
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {features.map((feature, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ delay: index * 0.1 }}
+              >
+                <GlassCard className="p-6 h-full" hover>
+                  <div className={`w-12 h-12 rounded-xl bg-${feature.color === 'primary' ? 'primary-500' : feature.color}/20 flex items-center justify-center mb-4`}>
+                    <feature.icon className={`w-6 h-6 ${feature.color === 'primary' ? 'text-primary-400' : `text-${feature.color}`}`} />
+                  </div>
+                  <h3 className="text-lg font-semibold text-white mb-2">{feature.title}</h3>
+                  <p className="text-white/60 text-sm leading-relaxed">{feature.description}</p>
+                </GlassCard>
+              </motion.div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* WhatsApp CTA */}
+      <section className="py-16 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-4xl mx-auto">
+          <GlassCard className="p-8 sm:p-12 text-center relative overflow-hidden" accentColor="primary">
+            <div className="absolute inset-0 bg-gradient-to-r from-green-500/5 to-primary-500/5" />
+            <div className="relative z-10">
+              <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-green-500/20 flex items-center justify-center">
+                <MessageCircle className="w-8 h-8 text-green-400" />
+              </div>
+              <h2 className="text-2xl sm:text-3xl font-display font-bold text-white mb-4">
+                Get Weather Alerts on WhatsApp
+              </h2>
+              <p className="text-white/60 mb-8 max-w-xl mx-auto">
+                Receive daily forecasts, crop advisories, and severe weather alerts directly on WhatsApp. Perfect for areas with limited internet.
+              </p>
+              <motion.a
+                href="https://wa.me/911234567890"
+                target="_blank"
+                rel="noopener noreferrer"
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="inline-flex items-center gap-3 px-8 py-4 rounded-xl bg-green-500 text-white font-semibold hover:bg-green-600 transition-all shadow-lg"
+              >
+                <MessageCircle className="w-5 h-5" />
+                Connect on WhatsApp
+                <ChevronRight className="w-5 h-5" />
+              </motion.a>
+            </div>
+          </GlassCard>
+        </div>
+      </section>
+
+      {/* Final CTA */}
       <section className="py-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-6">
-            Ready to Experience Hyperlocal Weather Intelligence?
-          </h2>
-          <p className="text-lg text-gray-600 mb-8">
-            Join thousands of users who trust Mausam Vaani for precise, actionable weather insights
-          </p>
-          <button className="bg-primary-600 text-white px-10 py-4 rounded-lg hover:bg-primary-700 transition-colors font-semibold text-lg shadow-lg hover:shadow-xl">
-            Start Your Free Trial
-          </button>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+          >
+            <h2 className="text-3xl sm:text-4xl font-display font-bold text-white mb-6">
+              Ready to Experience Hyperlocal Weather Intelligence?
+            </h2>
+            <p className="text-white/60 mb-8 text-lg">
+              Join thousands of users who trust Mausam Vaani for precise, actionable weather insights
+            </p>
+            <Link to="/signup">
+              <Button variant="primary" size="lg" icon={ArrowRight} iconPosition="right">
+                Start Your Free Trial
+              </Button>
+            </Link>
+          </motion.div>
         </div>
       </section>
     </div>

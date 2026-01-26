@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { Mail, Phone, MapPin, Send } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { Mail, MapPin, Send, MessageCircle, Clock, ChevronDown, ChevronUp } from 'lucide-react'
+import { GlassCard, Button } from '../components/Shared'
 
 const Contact = () => {
   const [formData, setFormData] = useState({
@@ -9,6 +11,8 @@ const Contact = () => {
     subject: '',
     message: ''
   })
+  const [expandedFaq, setExpandedFaq] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   const handleChange = (e) => {
     setFormData({
@@ -17,253 +21,275 @@ const Contact = () => {
     })
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault()
-    // Handle form submission - will be connected to backend later
-    console.log('Form submitted:', formData)
+    setIsSubmitting(true)
+    await new Promise(resolve => setTimeout(resolve, 1000))
     alert('Thank you for your message! We will get back to you soon.')
-    setFormData({
-      name: '',
-      email: '',
-      phone: '',
-      subject: '',
-      message: ''
-    })
+    setFormData({ name: '', email: '', phone: '', subject: '', message: '' })
+    setIsSubmitting(false)
   }
+
+  const faqs = [
+    {
+      question: 'How accurate are your hyperlocal forecasts?',
+      answer: 'Our forecasts achieve 95%+ accuracy by combining advanced AI models with multi-source data fusion and rigorous quality control processes.'
+    },
+    {
+      question: 'Can I integrate Mausam Vaani into my application?',
+      answer: 'Yes! We offer a comprehensive API ecosystem with unified JSON responses. Contact our sales team to learn more about our enterprise API packages.'
+    },
+    {
+      question: 'Do you offer support in regional languages?',
+      answer: 'Absolutely! Our AI-powered personalization layer supports multiple Indian languages including Hindi, Marathi, Tamil, and more.'
+    },
+    {
+      question: 'What areas do you currently cover?',
+      answer: 'We currently cover 500+ districts across India with street and village-scale resolution, and we are expanding coverage daily.'
+    },
+  ]
 
   return (
     <div className="min-h-screen py-12">
-      {/* Header */}
+      {/* Hero Section */}
       <section className="px-4 sm:px-6 lg:px-8 mb-16">
         <div className="max-w-7xl mx-auto text-center">
-          <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 mb-6">
-            Get in Touch
-          </h1>
-          <p className="text-xl text-gray-600 max-w-3xl mx-auto">
-            Have questions? We'd love to hear from you. Send us a message and we'll respond as soon as possible.
-          </p>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+          >
+            <span className="text-6xl mb-6 block">💬</span>
+            <h1 className="text-4xl sm:text-5xl font-display font-bold text-white mb-6">
+              Get in <span className="neon-text">Touch</span>
+            </h1>
+            <p className="text-xl text-white/60 max-w-3xl mx-auto">
+              Have questions? We'd love to hear from you. Send us a message and we'll respond as soon as possible.
+            </p>
+          </motion.div>
         </div>
       </section>
 
       {/* Contact Content */}
       <section className="px-4 sm:px-6 lg:px-8 mb-20">
         <div className="max-w-7xl mx-auto">
-          <div className="grid md:grid-cols-5 gap-12">
+          <div className="grid lg:grid-cols-5 gap-12">
             {/* Contact Information */}
-            <div className="md:col-span-2">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Contact Information</h2>
-              <p className="text-gray-600 mb-8">
-                Reach out to us through any of these channels. Our team is here to help you.
-              </p>
-
-              <div className="space-y-6">
-                <div className="flex items-start space-x-4">
-                  <div className="flex items-center justify-center w-12 h-12 bg-primary-100 rounded-lg flex-shrink-0">
-                    <Mail className="h-6 w-6 text-primary-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900 mb-1">Email</h3>
-                    <p className="text-gray-600">info@mausamvaani.com</p>
-                    <p className="text-gray-600">support@mausamvaani.com</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start space-x-4">
-                  <div className="flex items-center justify-center w-12 h-12 bg-primary-100 rounded-lg flex-shrink-0">
-                    <Phone className="h-6 w-6 text-primary-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900 mb-1">Phone</h3>
-                    <p className="text-gray-600">+91 123 456 7890</p>
-                    <p className="text-gray-600">Mon-Fri 9am-6pm IST</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start space-x-4">
-                  <div className="flex items-center justify-center w-12 h-12 bg-primary-100 rounded-lg flex-shrink-0">
-                    <MapPin className="h-6 w-6 text-primary-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900 mb-1">Office</h3>
-                    <p className="text-gray-600">India</p>
-                    <p className="text-gray-600">Coming Soon</p>
-                  </div>
-                </div>
+            <motion.div 
+              className="lg:col-span-2 space-y-6"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.2 }}
+            >
+              <div>
+                <h2 className="text-2xl font-bold text-white mb-4">Contact Information</h2>
+                <p className="text-white/60">
+                  Reach out to us through any of these channels. Our team is here to help you.
+                </p>
               </div>
 
-              {/* Business Hours */}
-              <div className="mt-8 bg-gradient-to-br from-blue-50 to-sky-50 rounded-xl p-6">
-                <h3 className="font-semibold text-gray-900 mb-4">Business Hours</h3>
-                <div className="space-y-2 text-gray-600">
-                  <div className="flex justify-between">
-                    <span>Monday - Friday</span>
-                    <span>9:00 AM - 6:00 PM</span>
+              <div className="space-y-4">
+                <GlassCard className="p-4">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-primary-500/20 flex items-center justify-center flex-shrink-0 border border-primary-500/30">
+                      <Mail className="w-5 h-5 text-primary-400" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-white mb-1">Email</h3>
+                      <p className="text-white/60 text-sm">info@mausamvaani.com</p>
+                      <p className="text-white/60 text-sm">support@mausamvaani.com</p>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Saturday</span>
-                    <span>10:00 AM - 4:00 PM</span>
+                </GlassCard>
+
+                <GlassCard className="p-4">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-green-500/20 flex items-center justify-center flex-shrink-0 border border-green-500/30">
+                      <MessageCircle className="w-5 h-5 text-green-400" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-white mb-1">WhatsApp</h3>
+                      <p className="text-white/60 text-sm">+91 123 456 7890</p>
+                      <p className="text-white/60 text-sm">Quick responses within 1 hour</p>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span>Sunday</span>
-                    <span>Closed</span>
+                </GlassCard>
+
+                <GlassCard className="p-4">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-weather-sunny/20 flex items-center justify-center flex-shrink-0 border border-weather-sunny/30">
+                      <Clock className="w-5 h-5 text-weather-sunny" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-white mb-1">Business Hours</h3>
+                      <div className="text-white/60 text-sm space-y-1">
+                        <p>Mon - Fri: 9:00 AM - 6:00 PM</p>
+                        <p>Saturday: 10:00 AM - 4:00 PM</p>
+                        <p>Sunday: Closed</p>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                </GlassCard>
+
+                <GlassCard className="p-4">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 rounded-xl bg-weather-rain/20 flex items-center justify-center flex-shrink-0 border border-weather-rain/30">
+                      <MapPin className="w-5 h-5 text-weather-rain" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-white mb-1">Office</h3>
+                      <p className="text-white/60 text-sm">India</p>
+                      <p className="text-white/60 text-sm">Physical office coming soon</p>
+                    </div>
+                  </div>
+                </GlassCard>
               </div>
-            </div>
+            </motion.div>
 
             {/* Contact Form */}
-            <div className="md:col-span-3">
-              <div className="bg-white rounded-2xl shadow-xl p-8">
-                <h2 className="text-2xl font-bold text-gray-900 mb-6">Send us a Message</h2>
+            <motion.div 
+              className="lg:col-span-3"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.3 }}
+            >
+              <GlassCard className="p-8">
+                <h2 className="text-2xl font-bold text-white mb-6">Send us a Message</h2>
                 <form onSubmit={handleSubmit} className="space-y-6">
                   <div className="grid md:grid-cols-2 gap-6">
-                    <div>
-                      <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-2">
-                        Full Name *
-                      </label>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-white/70">Full Name *</label>
                       <input
                         type="text"
-                        id="name"
                         name="name"
                         required
                         value={formData.name}
                         onChange={handleChange}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition"
-                        placeholder="John Doe"
+                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition-all"
+                        placeholder="Your name"
                       />
                     </div>
 
-                    <div>
-                      <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                        Email Address *
-                      </label>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-white/70">Email Address *</label>
                       <input
                         type="email"
-                        id="email"
                         name="email"
                         required
                         value={formData.email}
                         onChange={handleChange}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition"
-                        placeholder="john@example.com"
+                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition-all"
+                        placeholder="your@email.com"
                       />
                     </div>
                   </div>
 
                   <div className="grid md:grid-cols-2 gap-6">
-                    <div>
-                      <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-2">
-                        Phone Number
-                      </label>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-white/70">Phone Number</label>
                       <input
                         type="tel"
-                        id="phone"
                         name="phone"
                         value={formData.phone}
                         onChange={handleChange}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition"
+                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition-all"
                         placeholder="+91 98765 43210"
                       />
                     </div>
 
-                    <div>
-                      <label htmlFor="subject" className="block text-sm font-medium text-gray-700 mb-2">
-                        Subject *
-                      </label>
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-white/70">Subject *</label>
                       <select
-                        id="subject"
                         name="subject"
                         required
                         value={formData.subject}
                         onChange={handleChange}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition"
+                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition-all"
                       >
-                        <option value="">Select a subject</option>
-                        <option value="general">General Inquiry</option>
-                        <option value="support">Technical Support</option>
-                        <option value="sales">Sales</option>
-                        <option value="partnership">Partnership</option>
-                        <option value="feedback">Feedback</option>
+                        <option value="" className="bg-dark-800">Select a subject</option>
+                        <option value="general" className="bg-dark-800">General Inquiry</option>
+                        <option value="support" className="bg-dark-800">Technical Support</option>
+                        <option value="sales" className="bg-dark-800">Sales</option>
+                        <option value="partnership" className="bg-dark-800">Partnership</option>
+                        <option value="feedback" className="bg-dark-800">Feedback</option>
                       </select>
                     </div>
                   </div>
 
-                  <div>
-                    <label htmlFor="message" className="block text-sm font-medium text-gray-700 mb-2">
-                      Message *
-                    </label>
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-white/70">Message *</label>
                     <textarea
-                      id="message"
                       name="message"
                       required
                       value={formData.message}
                       onChange={handleChange}
-                      rows="6"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent outline-none transition resize-none"
+                      rows="5"
+                      className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder-white/30 focus:border-primary-500 focus:ring-1 focus:ring-primary-500 outline-none transition-all resize-none"
                       placeholder="Tell us more about your inquiry..."
-                    ></textarea>
+                    />
                   </div>
 
-                  <button
-                    type="submit"
-                    className="w-full bg-primary-600 text-white px-6 py-4 rounded-lg hover:bg-primary-700 transition-colors font-semibold flex items-center justify-center space-x-2 shadow-lg hover:shadow-xl"
+                  <Button 
+                    type="submit" 
+                    variant="primary" 
+                    size="lg" 
+                    icon={Send}
+                    loading={isSubmitting}
+                    className="w-full"
                   >
-                    <Send className="h-5 w-5" />
-                    <span>Send Message</span>
-                  </button>
+                    Send Message
+                  </Button>
                 </form>
-              </div>
-            </div>
+              </GlassCard>
+            </motion.div>
           </div>
         </div>
       </section>
 
       {/* FAQ Section */}
-      <section className="px-4 sm:px-6 lg:px-8 mb-20 bg-gradient-to-br from-gray-50 to-blue-50 py-16">
+      <section className="px-4 sm:px-6 lg:px-8 mb-20">
         <div className="max-w-4xl mx-auto">
-          <h2 className="text-3xl font-bold text-gray-900 mb-8 text-center">
+          <motion.h2 
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            className="text-3xl font-bold text-white mb-8 text-center"
+          >
             Frequently Asked Questions
-          </h2>
+          </motion.h2>
+          
           <div className="space-y-4">
-            <div className="bg-white rounded-xl p-6 shadow-md">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                How accurate are your hyperlocal forecasts?
-              </h3>
-              <p className="text-gray-600">
-                Our forecasts achieve 99.9% accuracy by combining advanced AI models with multi-source data fusion 
-                and rigorous quality control processes.
-              </p>
-            </div>
-
-            <div className="bg-white rounded-xl p-6 shadow-md">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                Can I integrate Mausam Vaani into my application?
-              </h3>
-              <p className="text-gray-600">
-                Yes! We offer a comprehensive API ecosystem with unified JSON responses. Contact our sales team 
-                to learn more about our enterprise API packages.
-              </p>
-            </div>
-
-            <div className="bg-white rounded-xl p-6 shadow-md">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                Do you offer support in regional languages?
-              </h3>
-              <p className="text-gray-600">
-                Absolutely! Our AI-powered personalization layer supports multiple Indian languages, making 
-                weather intelligence accessible to everyone.
-              </p>
-            </div>
-
-            <div className="bg-white rounded-xl p-6 shadow-md">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                What areas do you currently cover?
-              </h3>
-              <p className="text-gray-600">
-                We currently cover 500+ cities across India with street and village-scale resolution, 
-                and we're expanding coverage daily.
-              </p>
-            </div>
+            {faqs.map((faq, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+                viewport={{ once: true }}
+              >
+                <GlassCard className="overflow-hidden">
+                  <button
+                    onClick={() => setExpandedFaq(expandedFaq === index ? null : index)}
+                    className="w-full p-6 flex items-center justify-between text-left"
+                  >
+                    <h3 className="font-semibold text-white pr-4">{faq.question}</h3>
+                    {expandedFaq === index ? (
+                      <ChevronUp className="w-5 h-5 text-primary-400 flex-shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-5 h-5 text-white/40 flex-shrink-0" />
+                    )}
+                  </button>
+                  {expandedFaq === index && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      className="px-6 pb-6"
+                    >
+                      <p className="text-white/60">{faq.answer}</p>
+                    </motion.div>
+                  )}
+                </GlassCard>
+              </motion.div>
+            ))}
           </div>
         </div>
       </section>
