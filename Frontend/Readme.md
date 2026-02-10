@@ -1,91 +1,90 @@
 # Mausam Vaani Frontend
 
-A modern, responsive React application for hyperlocal weather intelligence built with Vite and Tailwind CSS.
+**Modern React weather web app with real-time location-based forecasts**
 
-## 🚀 Features
+## ✨ Features
 
-- **Hyperlocal Forecasting**: Street/village-scale micro-climate resolution
-- **Data Fusion**: Multi-source weather data integration
-- **Impact Intelligence**: Weather to actionable insights
-- **AI Personalization**: Multi-language, context-aware advisories
-- **Universal Accessibility**: Web, SMS, WhatsApp, Voice support
-- **API Ecosystem**: Unified JSON advisory responses
+- **Pure dark black theme** with glassmorphism UI
+- **Real-time location** auto-detected on every load
+- **Guest + Signed-in** user flows
+- **10-minute auto-refresh** of weather data
+- **Smooth animations** with Framer Motion
+- **Interactive weather map** with Leaflet
+- **AI insights** for logged-in users
+- **Responsive** mobile-first design
 
-## 🛠️ Tech Stack
+## 🚀 Tech Stack
 
-- **React 18** - UI library
-- **Vite** - Build tool and dev server
-- **Tailwind CSS** - Utility-first CSS framework
-- **React Router** - Client-side routing
-- **Lucide React** - Beautiful icon library
-- **clsx** - Utility for conditional classNames
+- React 19 + Vite 6
+- Tailwind CSS v4
+- React Router v7
+- Framer Motion
+- Recharts (weather graphs)
+- Leaflet (interactive maps)
+- Axios
 
-## 📦 Installation
+## 📦 Quick Start
 
-1. Install dependencies:
 ```bash
+# Install dependencies
 npm install
-```
 
-2. Start the development server:
-```bash
+# Create .env file
+cp .env.example .env
+
+# Add your OpenWeatherMap API key to .env
+
+# Start dev server
 npm run dev
+
+# Build for production
+npm run build
 ```
 
-The app will open at `http://localhost:3000`
+## 🔑 Environment Variables
 
-## 🏗️ Project Structure
-
-```
-Frontend/
-├── public/              # Static assets
-├── src/
-│   ├── components/      # Reusable components
-│   │   ├── Navbar.jsx
-│   │   ├── Footer.jsx
-│   │   └── FeatureCard.jsx
-│   ├── pages/           # Page components
-│   │   ├── Home.jsx
-│   │   ├── Features.jsx
-│   │   ├── About.jsx
-│   │   └── Contact.jsx
-│   ├── App.jsx          # Main app component
-│   ├── main.jsx         # Entry point
-│   └── index.css        # Global styles
-├── index.html
-├── package.json
-├── vite.config.js
-├── tailwind.config.js
-└── postcss.config.js
+```env
+VITE_OWM_KEY=          # OpenWeatherMap API key (free at openweathermap.org)
+VITE_API_URL=          # Backend API URL (default: http://localhost:5000/api)
 ```
 
-## 📜 Available Scripts
+## 📁 Project Structure
 
-- `npm run dev` - Start development server
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
-- `npm run lint` - Run ESLint
+```
+src/
+├── app/              # Router configuration
+├── components/       # Reusable UI components
+├── context/          # React contexts (Auth, Theme)
+├── hooks/            # Custom hooks (useLocation, useWeather)
+├── pages/            # Route pages
+├── services/         # API clients
+└── utils/            # Helpers & formatters
+```
 
-## 🎨 Design Features
+## 📱 Pages
 
-- Fully responsive design (mobile-first approach)
-- Modern gradient backgrounds
-- Smooth transitions and hover effects
-- Accessible color contrast
-- Clean, professional UI/UX
+| Route | Description |
+|-------|-------------|
+| `/` | Home dashboard with current weather + AI insights |
+| `/forecast` | Hourly/daily forecast with charts |
+| `/map` | Interactive weather radar map |
+| `/alerts` | Weather warnings & safety tips |
+| `/planner` | AI activity planner (signed-in only) |
+| `/login` | OTP phone login |
+| `/signup` | User onboarding |
+| `/profile` | Settings & logout |
 
-## 🔮 Future Integration
+## 📍 Real-time Location
 
-The frontend is ready for backend integration. API endpoints can be connected to:
-- Weather data services
-- AI advisory engine
-- User authentication
-- Multi-channel delivery systems
+The app automatically requests browser geolocation on every load. Falls back to New Delhi if permission denied.
 
-## 🤝 Contributing
+**No manual city search** — always uses live location.
 
-This is part of the Mausam Vaani project. Backend and AI components will be developed separately.
+## 🎨 Theme
 
-## 📄 License
+Pure dark black glassmorphism design inspired by modern weather apps. Minimal, clean, fast.
 
-All rights reserved - Mausam Vaani © 2025
+---
+
+**Built for Mausam Vaani** 🌦️
+

@@ -1349,6 +1349,348 @@ async def predict_weather(request: PredictionRequest):
         )
 
 # ============================================================================
+# PLANNER ENDPOINTS (for Frontend Planner Page)
+# ============================================================================
+
+class PlannerRequest(BaseModel):
+    """Request model for AI Planner"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "persona": "driver",
+                "location": {"lat": 28.6139, "lon": 77.209, "city": "Delhi"},
+                "weatherData": {"current": {"temp": 32, "humidity": 60, "condition": "Clear"}},
+                "activity": "travel",
+                "date": "2026-02-09",
+                "timeRange": {"start": "09:00", "end": "18:00"},
+                "risks": ["avoid_rain", "avoid_heat"],
+                "duration": 4,
+                "notes": "Carrying equipment"
+            }
+        }
+    )
+    
+    persona: str = Field("general", description="User persona (driver, farmer, worker, etc.)")
+    location: Optional[Dict] = Field(None, description="Location with lat, lon, city")
+    weatherData: Optional[Dict] = Field(None, description="Current weather data from frontend")
+    activity: str = Field(..., description="Activity type (travel, farming, outdoor, event, delivery, exercise, commute, other)")
+    date: Optional[str] = Field(None, description="Planned date (YYYY-MM-DD)")
+    timeRange: Optional[Dict] = Field(None, description="Time range with start and end times")
+    risks: List[str] = Field(default_factory=list, description="Risks to avoid (avoid_rain, avoid_heat, etc.)")
+    duration: Optional[int] = Field(4, description="Duration in hours")
+    notes: Optional[str] = Field(None, description="Additional notes")
+
+class QuickInsightRequest(BaseModel):
+    """Request model for quick dashboard insights"""
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "weatherData": {"current": {"temp": 32, "humidity": 60, "condition": "Clear"}},
+                "persona": "driver",
+                "location": {"lat": 28.6139, "lon": 77.209, "city": "Delhi"},
+                "weatherRisks": ["heat", "rain"]
+            }
+        }
+    )
+    
+    weatherData: Dict = Field(..., description="Weather data from frontend")
+    persona: str = Field("general", description="User persona")
+    location: Optional[Dict] = Field(None, description="Location info")
+    weatherRisks: List[str] = Field(default_factory=list, description="User's weather risk preferences")
+    timestamp: Optional[str] = Field(None, description="Request timestamp")
+
+@app.post("/quick-insight")
+async def get_quick_insight(request: QuickInsightRequest):
+    """
+    Quick insight endpoint for dashboard - lightweight, fast response
+    Uses Gemini for personalized micro-advice
+    """
+    try:
+        logger.info(f"Quick insight request for persona: {request.persona}")
+        
+        weather = request.weatherData
+        current = weather.get('current', {})
+        persona = request.persona
+        location = request.location
+        
+        # Try to use Gemini for personalized insight
+        if GEMINI_API_KEY:
+            try:
+                genai.configure(api_key=GEMINI_API_KEY)
+                model = genai.GenerativeModel('gemini-2.5-flash')
+                
+                prompt = f"""You are a concise weather advisor for India. Generate a SHORT personalized weather tip.
+
+Current Weather at {location.get('city', 'Unknown') if location else 'Unknown'}:
+- Temperature: {current.get('temp', 'N/A')}°C
+- Humidity: {current.get('humidity', 'N/A')}%
+- Condition: {current.get('condition', 'N/A')}
+- Wind: {current.get('wind', 'N/A')} km/h
+
+User Profile:
+- Persona: {persona}
+- Weather Risks to avoid: {', '.join(request.weatherRisks) if request.weatherRisks else 'None specified'}
+
+Provide a response in this exact JSON format:
+{{
+  "title": "Short 2-3 word title (e.g., 'Heat Alert', 'Rain Expected', 'Good Conditions')",
+  "message": "One concise actionable sentence (max 20 words) tailored to this persona"
+}}
+
+Output ONLY the JSON, no other text."""
+
+                response = model.generate_content(prompt)
+                response_text = response.text.strip()
+                
+                # Parse JSON response
+                import re
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    insight = json.loads(json_match.group(0))
+                    return {
+                        "success": True,
+                        "title": insight.get("title", "Today's Tip"),
+                        "message": insight.get("message", "Check weather conditions before heading out."),
+                        "source": "gemini"
+                    }
+            except Exception as e:
+                logger.warning(f"Gemini quick insight failed: {e}, using fallback")
+        
+        # Fallback: rule-based insight
+        return generate_local_quick_insight(current, persona, request.weatherRisks)
+        
+    except Exception as e:
+        logger.error(f"Quick insight error: {e}")
+        return {
+            "success": True,
+            "title": "Weather Update",
+            "message": "Check current conditions before planning outdoor activities.",
+            "source": "fallback"
+        }
+
+@app.post("/planner")
+async def get_smart_plan(request: PlannerRequest):
+    """
+    Comprehensive AI Planner endpoint - scenario-based predictions
+    Uses Gemini for detailed planning advice
+    """
+    try:
+        logger.info(f"Planner request for activity: {request.activity}")
+        
+        weather = request.weatherData or {}
+        current = weather.get('current', {})
+        location = request.location or {}
+        
+        # Try to use Gemini for comprehensive planning
+        if GEMINI_API_KEY:
+            try:
+                genai.configure(api_key=GEMINI_API_KEY)
+                model = genai.GenerativeModel('gemini-2.5-flash')
+                
+                prompt = f"""You are an AI weather planner for India. Provide detailed planning advice.
+
+CONTEXT:
+Location: {location.get('city', 'Unknown')}
+Activity: {request.activity}
+Date: {request.date or 'Today'}
+Time Range: {request.timeRange.get('start', '09:00')} to {request.timeRange.get('end', '18:00') if request.timeRange else '09:00 to 18:00'}
+Duration: {request.duration or 4} hours
+User Persona: {request.persona}
+Risks to Avoid: {', '.join(request.risks) if request.risks else 'None specified'}
+Notes: {request.notes or 'None'}
+
+Current Weather:
+- Temperature: {current.get('temp', 'N/A')}°C
+- Humidity: {current.get('humidity', 'N/A')}%
+- Condition: {current.get('condition', 'N/A')}
+- Wind: {current.get('wind', 'N/A')} km/h
+
+Provide response in this exact JSON format:
+{{
+  "recommendation": "Main recommendation sentence (what to do and when)",
+  "bestTime": "Best time window (e.g., '06:00 - 10:00' or '09:00')",
+  "avoidTime": "Time to avoid if any (e.g., '12:00 - 16:00' or null)",
+  "riskLevel": "Low/Medium/High",
+  "tips": ["Tip 1", "Tip 2", "Tip 3", "Tip 4"]
+}}
+
+Consider:
+- Indian weather patterns
+- Activity-specific requirements
+- User's persona and risk preferences
+- Practical, actionable advice
+
+Output ONLY the JSON, no other text."""
+
+                response = model.generate_content(prompt)
+                response_text = response.text.strip()
+                
+                # Parse JSON response
+                import re
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    plan = json.loads(json_match.group(0))
+                    return {
+                        "success": True,
+                        "recommendation": plan.get("recommendation", "Good conditions for your activity."),
+                        "bestTime": plan.get("bestTime", request.timeRange.get('start', '09:00') if request.timeRange else '09:00'),
+                        "avoidTime": plan.get("avoidTime"),
+                        "riskLevel": plan.get("riskLevel", "Low"),
+                        "tips": plan.get("tips", ["Check current conditions", "Stay prepared"]),
+                        "activity": request.activity,
+                        "source": "gemini"
+                    }
+            except Exception as e:
+                logger.warning(f"Gemini planner failed: {e}, using fallback")
+        
+        # Fallback: rule-based planning
+        return generate_local_plan(request)
+        
+    except Exception as e:
+        logger.error(f"Planner error: {e}")
+        return {
+            "success": True,
+            "recommendation": "Unable to generate detailed plan. Check weather conditions before proceeding.",
+            "bestTime": "09:00",
+            "avoidTime": None,
+            "riskLevel": "Medium",
+            "tips": ["Check current weather", "Stay prepared for changes"],
+            "activity": request.activity,
+            "source": "error_fallback"
+        }
+
+def generate_local_quick_insight(current: Dict, persona: str, risks: List[str]) -> Dict:
+    """Generate rule-based quick insight when Gemini unavailable"""
+    temp = current.get('temp', 25)
+    humidity = current.get('humidity', 50)
+    condition = str(current.get('condition', '')).lower()
+    wind = current.get('wind', 0)
+    
+    title = "Today's Tip"
+    message = "Good conditions for your activities today."
+    
+    if temp >= 35:
+        title = "Heat Alert"
+        message = "Extreme heat! Stay hydrated and avoid outdoor activities 12-4pm."
+    elif temp >= 30:
+        message = "High temperature. Carry water and wear light clothes."
+    elif temp <= 15:
+        title = "Cold Weather"
+        message = "Layer up before heading out."
+    
+    if 'rain' in condition or 'drizzle' in condition:
+        title = "Rain Expected"
+        message = "Carry umbrella. Roads may be slippery."
+    
+    if 'fog' in condition or 'mist' in condition:
+        title = "Fog Alert"
+        message = "Low visibility. Drive carefully."
+    
+    if wind >= 20:
+        title = "Wind Advisory"
+        message = "Strong winds expected. Secure loose items."
+    
+    # Persona-specific adjustments
+    if persona in ['driver', 'delivery'] and 'rain' in condition:
+        message = "Wet roads ahead. Increase following distance."
+    elif persona == 'farmer' and temp >= 32:
+        message = "Best farming hours: 5-10 AM. Avoid midday heat."
+    elif persona == 'worker' and temp >= 32:
+        message = "Take frequent breaks in shade. Hydrate every 30 mins."
+    
+    return {
+        "success": True,
+        "title": title,
+        "message": message,
+        "source": "local"
+    }
+
+def generate_local_plan(request: PlannerRequest) -> Dict:
+    """Generate rule-based plan when Gemini unavailable"""
+    weather = request.weatherData or {}
+    current = weather.get('current', {})
+    temp = current.get('temp', 25)
+    condition = str(current.get('condition', '')).lower()
+    
+    tips = []
+    risk_level = "Low"
+    recommendation = "Good conditions for your activity."
+    best_time = request.timeRange.get('start', '09:00') if request.timeRange else '09:00'
+    avoid_time = None
+    
+    activity = request.activity
+    
+    # Activity-specific logic
+    if activity in ['travel', 'commute']:
+        if 'rain' in condition:
+            tips.append("Allow extra travel time due to wet roads")
+            tips.append("Check traffic updates before departure")
+            risk_level = "Medium"
+        if temp >= 35:
+            tips.append("Ensure AC is working. Carry water")
+            avoid_time = "12:00 - 16:00"
+            best_time = "06:00 - 10:00"
+    
+    elif activity in ['outdoor', 'exercise']:
+        if temp >= 32:
+            recommendation = "Schedule for early morning (6-9 AM) or evening (5-7 PM)"
+            best_time = "06:00 - 09:00"
+            avoid_time = "11:00 - 16:00"
+            tips.append("Carry water and electrolytes")
+            risk_level = "Medium"
+        if 'rain' in condition:
+            tips.append("Consider indoor alternatives")
+            risk_level = "High"
+    
+    elif activity == 'farming':
+        if 'rain' in condition:
+            recommendation = "Good day for indoor farm work. Avoid field operations"
+            tips.append("Postpone pesticide and fertilizer application")
+        if temp >= 35:
+            recommendation = "Work in early morning (5-10 AM) or late evening"
+            best_time = "05:00 - 10:00"
+            avoid_time = "11:00 - 17:00"
+            tips.append("Hydrate workers frequently")
+    
+    elif activity == 'event':
+        if 'rain' in condition:
+            risk_level = "High"
+            recommendation = "Have backup indoor venue ready"
+            tips.append("Arrange canopy/tent coverage")
+        if temp >= 35:
+            tips.append("Arrange shade and cooling stations")
+    
+    elif activity == 'delivery':
+        if 'rain' in condition:
+            tips.append("Protect packages from water damage")
+            tips.append("Allow extra delivery time")
+            risk_level = "Medium"
+    
+    # Risk adjustments
+    if 'avoid_rain' in request.risks and 'rain' in condition:
+        risk_level = "High"
+        recommendation = "High rain probability. Consider postponing outdoor activities"
+    
+    if 'avoid_heat' in request.risks and temp >= 32:
+        risk_level = "Medium" if risk_level == "Low" else risk_level
+        best_time = "06:00 - 10:00"
+        avoid_time = "12:00 - 17:00"
+    
+    if not tips:
+        tips = ["Weather conditions are favorable", "Stay aware of any changes in forecast"]
+    
+    return {
+        "success": True,
+        "recommendation": recommendation,
+        "bestTime": best_time,
+        "avoidTime": avoid_time,
+        "riskLevel": risk_level,
+        "tips": tips,
+        "activity": activity,
+        "source": "local"
+    }
+
+# ============================================================================
 # MAIN
 # ============================================================================
 

@@ -1,11 +1,27 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
-// https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'react-router-dom'],
+          charts: ['recharts'],
+          maps: ['leaflet', 'react-leaflet'],
+          motion: ['framer-motion'],
+        },
+      },
+    },
+  },
+  // PWA support
   server: {
-    port: 3000,
-    open: true
-  }
+    headers: {
+      'Service-Worker-Allowed': '/',
+    },
+  },
+  // Ensure service worker and manifest are copied to dist
+  publicDir: 'public',
 })

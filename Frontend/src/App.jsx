@@ -1,85 +1,57 @@
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
-import { AnimatePresence, motion } from 'framer-motion'
-import Navbar from './components/Navbar'
-import Footer from './components/Footer'
-import { UserProvider } from './context/UserContext'
-import { WeatherProvider } from './context/WeatherContext'
-
-// Pages
-import Home from './pages/Home'
-import Features from './pages/Features'
-import About from './pages/About'
-import Contact from './pages/Contact'
-import Demo from './pages/Demo'
-import Dashboard from './pages/Dashboard'
-import Signup from './pages/Signup'
-import Login from './pages/Login'
-import Planner from './pages/Planner'
-import Maps from './pages/Maps'
-import Community from './pages/Community'
-import Settings from './pages/Settings'
-
-// Animated page wrapper
-const PageWrapper = ({ children }) => (
-  <motion.div
-    initial={{ opacity: 0, y: 20 }}
-    animate={{ opacity: 1, y: 0 }}
-    exit={{ opacity: 0, y: -20 }}
-    transition={{ duration: 0.3 }}
-  >
-    {children}
-  </motion.div>
-)
-
-// Layout component that handles footer visibility
-const Layout = ({ children }) => {
-  const location = useLocation()
-  const hideFooterPaths = ['/maps', '/signup', '/login']
-  const showFooter = !hideFooterPaths.includes(location.pathname)
-
-  return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-dark-900 via-dark-800 to-dark-900">
-      <Navbar />
-      <main className="flex-grow pt-16">
-        <AnimatePresence mode="wait">
-          {children}
-        </AnimatePresence>
-      </main>
-      {showFooter && <Footer />}
-    </div>
-  )
-}
+import { BrowserRouter } from "react-router-dom";
+import { useEffect } from "react";
+import { AuthProvider } from "./context/AuthContext";
+import { ThemeProvider } from "./context/ThemeContext";
+import Navbar from "./components/Navbar";
+import BottomNav from "./components/BottomNav";
+import InstallPrompt from "./components/InstallPrompt";
+import OfflineIndicator from "./components/OfflineIndicator";
+import AppRoutes from "./app/routes";
+import useLocation from "./hooks/useLocation";
+import { registerSW } from "./utils/pwa";
 
 function App() {
+  useEffect(() => {
+    // Register service worker for PWA functionality
+    registerSW();
+
+    // Track app launch for analytics
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      console.log('App launched in standalone mode');
+      // Track PWA usage if analytics is available
+      if (window.gtag) {
+        window.gtag('event', 'pwa_launch', {
+          event_category: 'PWA',
+          event_label: 'App launched from home screen'
+        });
+      }
+    }
+  }, []);
+
   return (
-    <UserProvider>
-      <WeatherProvider>
-        <Router>
-          <Layout>
-            <Routes>
-              {/* Public Routes */}
-              <Route path="/" element={<PageWrapper><Home /></PageWrapper>} />
-              <Route path="/features" element={<PageWrapper><Features /></PageWrapper>} />
-              <Route path="/about" element={<PageWrapper><About /></PageWrapper>} />
-              <Route path="/contact" element={<PageWrapper><Contact /></PageWrapper>} />
-              <Route path="/demo" element={<PageWrapper><Demo /></PageWrapper>} />
-              
-              {/* Auth Routes */}
-              <Route path="/signup" element={<PageWrapper><Signup /></PageWrapper>} />
-              <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
-              
-              {/* Protected Routes (Dashboard) */}
-              <Route path="/dashboard" element={<PageWrapper><Dashboard /></PageWrapper>} />
-              <Route path="/planner" element={<PageWrapper><Planner /></PageWrapper>} />
-              <Route path="/maps" element={<PageWrapper><Maps /></PageWrapper>} />
-              <Route path="/community" element={<PageWrapper><Community /></PageWrapper>} />
-              <Route path="/settings" element={<PageWrapper><Settings /></PageWrapper>} />
-            </Routes>
-          </Layout>
-        </Router>
-      </WeatherProvider>
-    </UserProvider>
-  )
+    <AuthProvider>
+      <ThemeProvider>
+        <BrowserRouter>
+          <div className="flex flex-col min-h-screen bg-gradient-to-br from-black via-gray-950 to-black">
+            <Navbar />
+
+            {/* Offline Indicator */}
+            <OfflineIndicator />
+
+            {/* Main content */}
+            <main className="flex-1 w-full px-4 py-6 pb-24 mx-auto max-w-7xl sm:px-6 lg:px-8 md:pb-6">
+              <AppRoutes />
+            </main>
+
+            <BottomNav />
+            
+            {/* PWA Install Prompt */}
+            <InstallPrompt />
+          </div>
+        </BrowserRouter>
+      </ThemeProvider>
+    </AuthProvider>
+  );
 }
 
-export default App
+export default App;
