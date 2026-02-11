@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "jest"
+    "test": "jest",
+    "build": "cd ../Frontend && npm install && npm run build",
+    "deploy": "npm run build && npm start"
   },
   "keywords": ["weather", "api", "nodejs", "mongodb"],
   "author": "Mausam Vaani Team",

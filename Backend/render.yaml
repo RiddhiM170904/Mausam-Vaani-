@@ -1,0 +1,33 @@
+# ===========================================
+# RENDER DEPLOYMENT CONFIG - BACKEND + FRONTEND
+# ===========================================
+# This service serves both the Node.js backend API and React frontend
+
+services:
+  # Backend + Frontend Service
+  - type: web
+    name: mausam-vaani-backend
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install && cd ../Frontend && npm install && npm run build && cd ../Backend
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGODB_URI
+        sync: false  # Add this manually in Render dashboard
+      - key: JWT_SECRET
+        sync: false  # Add this manually in Render dashboard
+      - key: JWT_EXPIRE
+        value: 30d
+      - key: AI_BACKEND_URL
+        value: https://mausam-vaani-ai.onrender.com  # Update with your AI backend URL
+      - key: OPENWEATHER_API_KEY
+        sync: false  # Add this manually in Render dashboard
+      - key: FRONTEND_URL
+        value: https://mausam-vaani-backend.onrender.com  # Update with your backend URL
+    healthCheckPath: /api/health
+    autoDeploy: true

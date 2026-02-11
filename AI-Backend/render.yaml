@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: mausam-vaani-api
+    name: mausam-vaani-ai
     env: python
     region: oregon
     plan: free
@@ -10,9 +10,22 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: ENVIRONMENT
+        value: production
+      - key: PORT
+        value: 10000
+      - key: HOST
+        value: 0.0.0.0
       - key: GEMINI_API_KEY
-        sync: false
+        sync: false  # Add this manually in Render dashboard
+      - key: OPENWEATHER_API_KEY
+        sync: false  # Add this manually in Render dashboard
       - key: MODEL_PATH
         value: best_model.pth
       - key: DEVICE
         value: cpu
+      - key: ALLOWED_ORIGINS
+        value: https://mausam-vaani-backend.onrender.com  # Update with your backend URL
+    healthCheckPath: /health
+    autoDeploy: true
+
