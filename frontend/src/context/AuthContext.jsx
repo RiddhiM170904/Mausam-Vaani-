@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
+import { isSupabaseConfigured, supabase } from "../services/supabaseClient";
 
 const AuthContext = createContext(null);
 
@@ -7,7 +8,6 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Restore session from localStorage
     const stored = localStorage.getItem("mv_user");
     if (stored) {
       try {
@@ -19,21 +19,44 @@ export function AuthProvider({ children }) {
     setLoading(false);
   }, []);
 
+  const refreshProfile = async () => {
+    if (!user?.id || !supabase) return null;
+    const { data, error } = await supabase
+      .from("users")
+      .select("*")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Profile refresh failed:", error.message);
+      return null;
+    }
+
+    const updatedUser = data || null;
+
+    if (updatedUser) {
+      setUser(updatedUser);
+      localStorage.setItem("mv_user", JSON.stringify(updatedUser));
+    }
+    return updatedUser;
+  };
+
   const login = (userData) => {
     setUser(userData);
     localStorage.setItem("mv_user", JSON.stringify(userData));
   };
 
-  const logout = () => {
+  const logout = async () => {
     setUser(null);
     localStorage.removeItem("mv_user");
-    localStorage.removeItem("mv_token");
   };
 
   const isLoggedIn = !!user;
 
   return (
-    <AuthContext.Provider value={{ user, loading, isLoggedIn, login, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, isLoggedIn, login, logout, refreshProfile }}
+    >
       {children}
     </AuthContext.Provider>
   );

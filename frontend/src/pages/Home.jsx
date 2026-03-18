@@ -145,7 +145,7 @@ export default function Home() {
       {/* AI Quick Insight Card */}
       {(insight || insightLoading) && (
         <motion.div variants={fadeUp}>
-          <GlassCard className="p-4 border-indigo-500/20 bg-gradient-to-r from-indigo-500/[0.08] to-purple-500/[0.08] m-5">
+          <GlassCard className="p-4 border-indigo-500/20 bg-linear-to-r from-indigo-500/8 to-purple-500/8 m-5">
             {insightLoading ? (
               <div className="flex items-center gap-3">
                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-indigo-500/20">
@@ -158,7 +158,7 @@ export default function Home() {
               </div>
             ) : insight && (
               <div className="flex items-start gap-3">
-                <div className="flex items-center justify-center flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600">
+                <div className="flex items-center justify-center shrink-0 w-10 h-10 rounded-xl bg-linear-to-br from-indigo-500 to-purple-600">
                   <Sparkles className="w-5 h-5 text-white" />
                 </div>
                 <div className="flex-1 min-w-0">

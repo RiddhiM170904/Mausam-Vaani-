@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { hashPassword, isSupabaseConfigured, supabase } from '../services/supabaseClient';
 import { 
   User, 
   Phone, 
@@ -228,23 +229,27 @@ const Signup = () => {
 
   // Handle location setup
   const handleLocationSetup = async () => {
-    if (formData.useCurrentLocation) {
-      try {
-        const coords = await getCurrentLocation();
-        
-        // Add current location to locations array
-        const currentLocation = {
-          name: 'Current Location',
-          type: 'current',
-          coordinates: coords,
-          isPrimary: true
-        };
-        
-        updateFormData('locations', [currentLocation]);
-      } catch (error) {
-        console.error('Location error:', error);
-        // Handle location error - maybe show manual location input
-      }
+    if (!formData.useCurrentLocation) {
+      return formData.locations?.[0] || null;
+    }
+
+    try {
+      const coords = await getCurrentLocation();
+      
+      // Add current location to locations array
+      const currentLocation = {
+        name: 'Current Location',
+        city: 'Current Location',
+        type: 'current',
+        coordinates: coords,
+        isPrimary: true
+      };
+      
+      updateFormData('locations', [currentLocation]);
+      return currentLocation;
+    } catch (error) {
+      console.error('Location error:', error);
+      return null;
     }
   };
 
@@ -255,46 +260,45 @@ const Signup = () => {
     setIsLoading(true);
     
     try {
-      // Setup location if needed
-      await handleLocationSetup();
-
-      // Use API_BASE environment variable or default to localhost
-      const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-      
-      const response = await fetch(`${API_BASE}/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        // Store token using the same key as existing code
-        localStorage.setItem('mv_token', data.token);
-        localStorage.setItem('mv_user', JSON.stringify(data.user));
-        
-        // Login user
-        await login(data.user);
-        
-        // Redirect to home
-        navigate('/');
-      } else {
-        if (data.errors) {
-          const errorObj = {};
-          data.errors.forEach(error => {
-            errorObj[error.path || error.param || 'general'] = error.msg || error.message;
-          });
-          setErrors(errorObj);
-        } else {
-          setErrors({ general: data.message || 'Registration failed' });
-        }
-        
-        // Go back to first step if there are validation errors
-        setCurrentStep(1);
+      if (!isSupabaseConfigured || !supabase) {
+        setErrors({ general: 'Supabase is not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.' });
+        return;
       }
+
+      const primaryLocation = await handleLocationSetup();
+      const locationsForProfile = formData.useCurrentLocation
+        ? (primaryLocation ? [primaryLocation] : [])
+        : formData.locations;
+      const resolvedPrimaryLocation = primaryLocation || locationsForProfile[0] || null;
+      const passwordHash = await hashPassword(formData.password);
+
+      const { data, error } = await supabase
+        .from('users')
+        .insert({
+          name: formData.name,
+          phone: formData.phone,
+          password_hash: passwordHash,
+          language: formData.language,
+          persona: formData.persona,
+          other_persona_text: formData.otherPersonaText,
+          weather_risks: formData.weatherRisks,
+          active_hours: formData.activeHours,
+          use_current_location: formData.useCurrentLocation,
+          locations: locationsForProfile,
+          location: resolvedPrimaryLocation,
+          notification_preferences: formData.notificationPreferences,
+          role: 'user',
+        })
+        .select('*')
+        .single();
+
+      if (error) {
+        setErrors({ general: error.message || 'Registration failed' });
+        return;
+      }
+
+      login(data);
+      navigate('/');
     } catch (error) {
       console.error('Registration error:', error);
       setErrors({ general: 'Network error. Please check your connection.' });
@@ -336,63 +340,63 @@ const Signup = () => {
   // Render step 1: Basic Info
   const renderStep1 = () => (
     <div className="space-y-6">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+      <div className="mb-8 text-center">
+        <div className="flex items-center justify-center w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl">
           <User className="w-8 h-8 text-white" />
         </div>
-        <h2 className="text-2xl font-bold text-white mb-2">Welcome to Mausam Vaani</h2>
+        <h2 className="mb-2 text-2xl font-bold text-white">Welcome to Mausam Vaani</h2>
         <p className="text-gray-400">Let's start with your basic information</p>
       </div>
 
       <div className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">Full Name</label>
+          <label className="block mb-2 text-sm font-medium text-gray-300">Full Name</label>
           <input
             type="text"
             value={formData.name}
             onChange={(e) => updateFormData('name', e.target.value)}
-            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-4 py-3 text-white placeholder-gray-500 bg-gray-800 border border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="Enter your full name"
           />
-          {errors.name && <p className="text-red-400 text-sm mt-1">{errors.name}</p>}
+          {errors.name && <p className="mt-1 text-sm text-red-400">{errors.name}</p>}
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">Phone Number</label>
+          <label className="block mb-2 text-sm font-medium text-gray-300">Phone Number</label>
           <div className="relative">
-            <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Phone className="absolute w-5 h-5 text-gray-400 transform -translate-y-1/2 left-3 top-1/2" />
             <input
               type="tel"
               value={formData.phone}
               onChange={(e) => updateFormData('phone', e.target.value.replace(/\D/g, ''))}
-              className="w-full pl-12 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full py-3 pl-12 pr-4 text-white placeholder-gray-500 bg-gray-800 border border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="10-digit mobile number"
               maxLength="10"
             />
           </div>
-          {errors.phone && <p className="text-red-400 text-sm mt-1">{errors.phone}</p>}
+          {errors.phone && <p className="mt-1 text-sm text-red-400">{errors.phone}</p>}
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
+          <label className="block mb-2 text-sm font-medium text-gray-300">Password</label>
           <input
             type="password"
             value={formData.password}
             onChange={(e) => updateFormData('password', e.target.value)}
-            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-4 py-3 text-white placeholder-gray-500 bg-gray-800 border border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="Create a password (min 6 characters)"
           />
-          {errors.password && <p className="text-red-400 text-sm mt-1">{errors.password}</p>}
+          {errors.password && <p className="mt-1 text-sm text-red-400">{errors.password}</p>}
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">Preferred Language</label>
+          <label className="block mb-2 text-sm font-medium text-gray-300">Preferred Language</label>
           <div className="relative">
-            <Globe className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
+            <Globe className="absolute w-5 h-5 text-gray-400 transform -translate-y-1/2 left-3 top-1/2" />
             <select
               value={formData.language}
               onChange={(e) => updateFormData('language', e.target.value)}
-              className="w-full pl-12 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none"
+              className="w-full py-3 pl-12 pr-4 text-white bg-gray-800 border border-gray-700 appearance-none rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               {languages.map(lang => (
                 <option key={lang.code} value={lang.code}>
@@ -409,11 +413,11 @@ const Signup = () => {
   // Render step 2: Persona
   const renderStep2 = () => (
     <div className="space-y-6">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-pink-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+      <div className="mb-8 text-center">
+        <div className="flex items-center justify-center w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-purple-500 to-pink-600 rounded-2xl">
           <UserCog className="w-8 h-8 text-white" />
         </div>
-        <h2 className="text-2xl font-bold text-white mb-2">What describes you best?</h2>
+        <h2 className="mb-2 text-2xl font-bold text-white">What describes you best?</h2>
         <p className="text-gray-400">This helps us provide relevant weather advice</p>
       </div>
 
@@ -443,31 +447,31 @@ const Signup = () => {
 
       {formData.persona === 'other' && (
         <div className="mt-4">
-          <label className="block text-sm font-medium text-gray-300 mb-2">Describe your work/role</label>
+          <label className="block mb-2 text-sm font-medium text-gray-300">Describe your work/role</label>
           <input
             type="text"
             value={formData.otherPersonaText}
             onChange={(e) => updateFormData('otherPersonaText', e.target.value)}
-            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-4 py-3 text-white placeholder-gray-500 bg-gray-800 border border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="e.g., Doctor, Teacher, etc."
             maxLength="100"
           />
-          {errors.otherPersonaText && <p className="text-red-400 text-sm mt-1">{errors.otherPersonaText}</p>}
+          {errors.otherPersonaText && <p className="mt-1 text-sm text-red-400">{errors.otherPersonaText}</p>}
         </div>
       )}
 
-      {errors.persona && <p className="text-red-400 text-sm">{errors.persona}</p>}
+      {errors.persona && <p className="text-sm text-red-400">{errors.persona}</p>}
     </div>
   );
 
   // Render step 3: Weather Risks
   const renderStep3 = () => (
     <div className="space-y-6">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-gradient-to-br from-green-500 to-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+      <div className="mb-8 text-center">
+        <div className="flex items-center justify-center w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-green-500 to-blue-600 rounded-2xl">
           <CloudRain className="w-8 h-8 text-white" />
         </div>
-        <h2 className="text-2xl font-bold text-white mb-2">Weather Concerns</h2>
+        <h2 className="mb-2 text-2xl font-bold text-white">Weather Concerns</h2>
         <p className="text-gray-400">What weather situations affect you the most?</p>
       </div>
 
@@ -499,18 +503,18 @@ const Signup = () => {
         ))}
       </div>
 
-      {errors.weatherRisks && <p className="text-red-400 text-sm">{errors.weatherRisks}</p>}
+      {errors.weatherRisks && <p className="text-sm text-red-400">{errors.weatherRisks}</p>}
     </div>
   );
 
   // Render step 4: Schedule
   const renderStep4 = () => (
     <div className="space-y-6">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+      <div className="mb-8 text-center">
+        <div className="flex items-center justify-center w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-orange-500 to-red-600 rounded-2xl">
           <Clock className="w-8 h-8 text-white" />
         </div>
-        <h2 className="text-2xl font-bold text-white mb-2">Daily Schedule</h2>
+        <h2 className="mb-2 text-2xl font-bold text-white">Daily Schedule</h2>
         <p className="text-gray-400">When do you usually go out or work?</p>
       </div>
 
@@ -534,7 +538,7 @@ const Signup = () => {
         {formData.activeHours.enabled && (
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">Start Time</label>
+              <label className="block mb-2 text-sm font-medium text-gray-300">Start Time</label>
               <input
                 type="time"
                 value={formData.activeHours.startTime}
@@ -542,11 +546,11 @@ const Signup = () => {
                   ...formData.activeHours, 
                   startTime: e.target.value 
                 })}
-                className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-3 text-white bg-gray-800 border border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-2">End Time</label>
+              <label className="block mb-2 text-sm font-medium text-gray-300">End Time</label>
               <input
                 type="time"
                 value={formData.activeHours.endTime}
@@ -554,14 +558,14 @@ const Signup = () => {
                   ...formData.activeHours, 
                   endTime: e.target.value 
                 })}
-                className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-3 text-white bg-gray-800 border border-gray-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
         )}
 
-        <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
-          <p className="text-blue-300 text-sm">
+        <div className="p-4 border bg-blue-500/10 border-blue-500/30 rounded-xl">
+          <p className="text-sm text-blue-300">
             <strong>Smart Scheduling:</strong> We'll send important alerts only during your active hours. 
             Emergency weather warnings will still reach you anytime.
           </p>
@@ -573,11 +577,11 @@ const Signup = () => {
   // Render step 5: Location
   const renderStep5 = () => (
     <div className="space-y-6">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-gradient-to-br from-teal-500 to-cyan-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+      <div className="mb-8 text-center">
+        <div className="flex items-center justify-center w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-teal-500 to-cyan-600 rounded-2xl">
           <MapPin className="w-8 h-8 text-white" />
         </div>
-        <h2 className="text-2xl font-bold text-white mb-2">Location Settings</h2>
+        <h2 className="mb-2 text-2xl font-bold text-white">Location Settings</h2>
         <p className="text-gray-400">How should we track your location for weather updates?</p>
       </div>
 
@@ -619,15 +623,15 @@ const Signup = () => {
         </div>
 
         {!formData.useCurrentLocation && (
-          <div className="mt-4 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
-            <p className="text-yellow-300 text-sm">
+          <div className="p-4 mt-4 border bg-yellow-500/10 border-yellow-500/30 rounded-xl">
+            <p className="text-sm text-yellow-300">
               <strong>Note:</strong> Manual location setup will be available after signup. 
               You can always change this setting later in your profile.
             </p>
           </div>
         )}
 
-        {errors.locations && <p className="text-red-400 text-sm">{errors.locations}</p>}
+        {errors.locations && <p className="text-sm text-red-400">{errors.locations}</p>}
       </div>
     </div>
   );
@@ -635,11 +639,11 @@ const Signup = () => {
   // Render step 6: Notifications
   const renderStep6 = () => (
     <div className="space-y-6">
-      <div className="text-center mb-8">
-        <div className="w-16 h-16 bg-gradient-to-br from-violet-500 to-purple-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+      <div className="mb-8 text-center">
+        <div className="flex items-center justify-center w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-violet-500 to-purple-600 rounded-2xl">
           <Bell className="w-8 h-8 text-white" />
         </div>
-        <h2 className="text-2xl font-bold text-white mb-2">Notification Preferences</h2>
+        <h2 className="mb-2 text-2xl font-bold text-white">Notification Preferences</h2>
         <p className="text-gray-400">How often would you like to receive weather updates?</p>
       </div>
 
@@ -665,7 +669,7 @@ const Signup = () => {
                   : 'border-gray-600'
               }`}>
                 {formData.notificationPreferences === option.id && (
-                  <div className="w-full h-full rounded-full bg-white transform scale-50"></div>
+                  <div className="w-full h-full transform scale-50 bg-white rounded-full"></div>
                 )}
               </div>
             </div>
@@ -673,8 +677,8 @@ const Signup = () => {
         ))}
       </div>
 
-      <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4">
-        <p className="text-green-300 text-sm">
+      <div className="p-4 border bg-green-500/10 border-green-500/30 rounded-xl">
+        <p className="text-sm text-green-300">
           <strong>Almost done!</strong> You can always adjust these settings later in your profile. 
           Click "Complete Setup" to finish creating your account.
         </p>
@@ -696,19 +700,19 @@ const Signup = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-black via-gray-950 to-black flex items-center justify-center p-4">
+    <div className="flex items-center justify-center min-h-screen p-4 bg-gradient-to-br from-black via-gray-950 to-black">
       <div className="w-full max-w-md">
         {/* Progress indicator */}
         {renderStepIndicator()}
 
         {/* Form content */}
-        <div className="bg-gradient-to-br from-gray-900/80 to-black/80 backdrop-blur-sm border border-gray-800 rounded-2xl p-6">
+        <div className="p-6 border border-gray-800 bg-gradient-to-br from-gray-900/80 to-black/80 backdrop-blur-sm rounded-2xl">
           {getCurrentStepContent()}
 
           {/* Error display */}
           {errors.general && (
-            <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-              <p className="text-red-400 text-sm">{errors.general}</p>
+            <div className="p-3 mt-4 border rounded-lg bg-red-500/10 border-red-500/30">
+              <p className="text-sm text-red-400">{errors.general}</p>
             </div>
           )}
 
@@ -718,7 +722,7 @@ const Signup = () => {
               <button
                 onClick={handlePrevious}
                 disabled={isLoading}
-                className="flex-1 px-4 py-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-xl hover:bg-gray-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                className="flex items-center justify-center flex-1 gap-2 px-4 py-3 text-gray-300 transition-colors bg-gray-800 border border-gray-700 rounded-xl hover:bg-gray-700 disabled:opacity-50"
               >
                 <ChevronLeft className="w-4 h-4" />
                 Previous
@@ -728,10 +732,10 @@ const Signup = () => {
             <button
               onClick={handleNext}
               disabled={isLoading}
-              className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-xl hover:from-blue-600 hover:to-purple-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+              className="flex items-center justify-center flex-1 gap-2 px-4 py-3 text-white transition-all bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl hover:from-blue-600 hover:to-purple-700 disabled:opacity-50"
             >
               {isLoading ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <div className="w-4 h-4 border-2 border-white rounded-full border-t-transparent animate-spin"></div>
               ) : (
                 <>
                   {currentStep === totalSteps ? 'Complete Setup' : 'Next'}
@@ -745,7 +749,7 @@ const Signup = () => {
           {[3, 4, 6].includes(currentStep) && (
             <button
               onClick={() => setCurrentStep(prev => prev + 1)}
-              className="w-full mt-2 text-gray-400 text-sm hover:text-gray-300 transition-colors"
+              className="w-full mt-2 text-sm text-gray-400 transition-colors hover:text-gray-300"
             >
               Skip for now
             </button>
@@ -753,12 +757,12 @@ const Signup = () => {
         </div>
 
         {/* Login link */}
-        <div className="text-center mt-6">
-          <p className="text-gray-400 text-sm">
+        <div className="mt-6 text-center">
+          <p className="text-sm text-gray-400">
             Already have an account?{' '}
             <button 
               onClick={() => navigate('/login')}
-              className="text-blue-400 hover:text-blue-300 transition-colors"
+              className="text-blue-400 transition-colors hover:text-blue-300"
             >
               Sign in
             </button>

@@ -1,13 +1,10 @@
-import api from "./api";
-
 // OpenWeatherMap free tier – replace with your own key
 const OWM_KEY = import.meta.env.VITE_OWM_KEY || "";
 const OWM_BASE = "https://api.openweathermap.org/data/2.5";
 const OWM_GEO = "https://api.openweathermap.org/geo/1.0";
 
 /**
- * Weather service — calls OpenWeatherMap directly for guest users
- * or proxies through our Node backend.
+  * Weather service — calls OpenWeatherMap directly.
  */
 export const weatherService = {
   /**
@@ -15,29 +12,15 @@ export const weatherService = {
    */
   async getFullWeather(lat, lon) {
     console.log(`Fetching weather for coordinates: ${lat}, ${lon}`);
-    
-    // Try backend first for logged in users
+
     try {
-      const res = await api.get("/weather", { params: { lat, lon } });
-      if (res.data) {
-        console.log('Weather data from backend:', res.data);
-        return res.data;
-      }
-    } catch (backendError) {
-      console.warn('Backend weather fetch failed, trying direct API:', backendError.message);
-      
-      // Fallback to direct OWM call
-      try {
-        const owmData = await this.getFromOWM(lat, lon);
-        console.log('Weather data from OpenWeatherMap direct:', owmData);
-        return owmData;
-      } catch (owmError) {
-        console.warn('OpenWeatherMap direct fetch failed:', owmError.message);
-        
-        // Last resort: mock data with location info
-        console.log('Using mock data as final fallback');
-        return this.getMockData(lat, lon);
-      }
+      const owmData = await this.getFromOWM(lat, lon);
+      console.log('Weather data from OpenWeatherMap direct:', owmData);
+      return owmData;
+    } catch (owmError) {
+      console.warn('OpenWeatherMap direct fetch failed:', owmError.message);
+      console.log('Using mock data as final fallback');
+      return this.getMockData(lat, lon);
     }
   },
 

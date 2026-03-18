@@ -5,6 +5,7 @@ const InstallPrompt = () => {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isVisible, setIsVisible] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
+  const [supportsPrompt, setSupportsPrompt] = useState(false);
 
   useEffect(() => {
     // Check if app is already installed
@@ -22,12 +23,13 @@ const InstallPrompt = () => {
 
     checkIfInstalled();
 
-    // Listen for the beforeinstallprompt event
+    // Listen for the beforeinstallprompt event (Android/desktop)
     const handleBeforeInstallPrompt = (e) => {
       // Prevent the mini-infobar from appearing on mobile
       e.preventDefault();
       // Save the event so it can be triggered later
       setDeferredPrompt(e);
+      setSupportsPrompt(true);
       
       // Show install prompt if not already installed and user hasn't dismissed it recently
       const dismissed = localStorage.getItem('installPromptDismissed');
@@ -48,6 +50,14 @@ const InstallPrompt = () => {
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
+
+    // Fallback prompt for iOS/Safari or when prompt is not available
+    const dismissed = localStorage.getItem('installPromptDismissed');
+    const dismissedTime = dismissed ? parseInt(dismissed) : 0;
+    const dayInMs = 24 * 60 * 60 * 1000;
+    if (!isInstalled && (!dismissed || (Date.now() - dismissedTime) > dayInMs * 7)) {
+      setTimeout(() => setIsVisible(true), 2000);
+    }
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
@@ -84,7 +94,11 @@ const InstallPrompt = () => {
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   };
 
-  if (!isVisible || isInstalled) return null;
+  const isIOS = () => /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const isStandaloneMode = () =>
+    window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+  if (!isVisible || isInstalled || isStandaloneMode()) return null;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -117,7 +131,7 @@ const InstallPrompt = () => {
             Install Mausam Vaani
           </h3>
           <p className="text-gray-300 text-sm mb-6">
-            Get instant access to weather updates right from your {isMobile() ? 'home screen' : 'desktop'}. 
+            Get instant access to weather updates right from your {isMobile() ? 'home screen' : 'desktop'}.
             Works offline and sends notifications for weather alerts.
           </p>
 
@@ -137,22 +151,38 @@ const InstallPrompt = () => {
             </div>
           </div>
 
-          {/* Buttons */}
-          <div className="flex gap-3">
-            <button
-              onClick={handleDismiss}
-              className="flex-1 px-4 py-2.5 text-gray-300 border border-gray-600 rounded-xl hover:bg-gray-800 transition-colors text-sm font-medium"
-            >
-              Not now
-            </button>
-            <button
-              onClick={handleInstallClick}
-              className="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-xl hover:from-blue-600 hover:to-purple-700 transition-colors text-sm font-medium flex items-center justify-center gap-2"
-            >
-              <Download className="w-4 h-4" />
-              Install
-            </button>
-          </div>
+          {supportsPrompt && deferredPrompt ? (
+            <div className="flex gap-3">
+              <button
+                onClick={handleDismiss}
+                className="flex-1 px-4 py-2.5 text-gray-300 border border-gray-600 rounded-xl hover:bg-gray-800 transition-colors text-sm font-medium"
+              >
+                Not now
+              </button>
+              <button
+                onClick={handleInstallClick}
+                className="flex-1 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-xl hover:from-blue-600 hover:to-purple-700 transition-colors text-sm font-medium flex items-center justify-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Install
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="text-xs text-gray-400">
+                {isIOS()
+                  ? "On iOS: Tap Share, then Add to Home Screen."
+                  : "On Android: Tap the browser menu, then Install app."
+                }
+              </div>
+              <button
+                onClick={handleDismiss}
+                className="w-full px-4 py-2.5 text-gray-300 border border-gray-600 rounded-xl hover:bg-gray-800 transition-colors text-sm font-medium"
+              >
+                Got it
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

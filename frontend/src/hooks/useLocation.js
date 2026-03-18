@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
-import api from "../services/api";
+import { supabase } from "../services/supabaseClient";
 
 /**
  * Enhanced Location hook with user preferences and location management.
@@ -15,7 +15,7 @@ export default function useLocation() {
   const [loading, setLoading] = useState(true);
   const [currentLocation, setCurrentLocation] = useState(null);
   const [savedLocation, setSavedLocation] = useState(null);
-  const { user, isLoggedIn } = useAuth();
+  const { user, isLoggedIn, refreshProfile } = useAuth();
 
   // Get current device location
   const getCurrentLocation = () => {
@@ -56,32 +56,53 @@ export default function useLocation() {
     return {
       lat: user.location.coordinates.latitude,
       lon: user.location.coordinates.longitude,
-      city: user.location.city || "Saved Location"
+      city: user.location.city || user.location.name || "Saved Location"
     };
   };
 
   // Update user's preferred location
   const updateUserLocation = async (locationData) => {
-    if (!isLoggedIn) return false;
+    if (!isLoggedIn || !user?.id) return false;
 
     try {
-      const response = await api.put('/user/location', {
+      const locationPayload = {
         city: locationData.city,
-        state: locationData.state || '',
-        district: locationData.district || '',
-        pincode: locationData.pincode || '',
+        state: locationData.state || "",
+        district: locationData.district || "",
+        pincode: locationData.pincode || "",
         coordinates: {
           latitude: locationData.lat,
-          longitude: locationData.lon
-        }
+          longitude: locationData.lon,
+        },
+      };
+
+      const { error } = await supabase
+        .from("users")
+        .update({
+          location: locationPayload,
+          locations: [locationPayload],
+          use_current_location: false,
+        })
+        .eq("id", user.id);
+
+      if (error) {
+        console.error("Failed to update location:", error.message);
+        return false;
+      }
+
+      setSavedLocation({
+        lat: locationData.lat,
+        lon: locationData.lon,
+        city: locationData.city,
+      });
+      setLocation({
+        lat: locationData.lat,
+        lon: locationData.lon,
+        city: locationData.city,
       });
 
-      if (response.data.success) {
-        setSavedLocation(locationData);
-        setLocation(locationData);
-        return true;
-      }
-      return false;
+      await refreshProfile();
+      return true;
     } catch (err) {
       console.error('Failed to update location:', err);
       return false;
