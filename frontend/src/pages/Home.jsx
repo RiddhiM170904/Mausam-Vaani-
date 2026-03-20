@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { MapPin, Navigation, Sparkles, ArrowRight } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import useLocation from "../hooks/useLocation";
 import useWeather from "../hooks/useWeather";
 import { useAuth } from "../context/AuthContext";
@@ -18,6 +18,7 @@ import Loader from "../components/Loader";
 import GlassCard from "../components/GlassCard";
 
 export default function Home() {
+  const navigate = useNavigate();
   const { location, currentLocation, savedLocation, loading: locationLoading, error: locationError, refreshLocation } = useLocation();
   const { data, loading, error } = useWeather(location?.lat, location?.lon);
   const { isLoggedIn, user } = useAuth();
@@ -47,6 +48,12 @@ export default function Home() {
         });
     }
   }, [data, user, location]);
+
+  useEffect(() => {
+    if (isLoggedIn && user && user.planner_profile_completed === false) {
+      navigate("/planner");
+    }
+  }, [isLoggedIn, user, navigate]);
 
   // Handle location selection
   const handleLocationSelect = (newLocation) => {

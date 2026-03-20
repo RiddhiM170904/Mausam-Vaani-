@@ -1,0 +1,304 @@
+{
+  "version": "2.0",
+  "user_types": {
+    "general": {
+      "compulsory": [
+        {
+          "key": "outdoor_activity",
+          "type": "select",
+          "label": "Outdoor activity level",
+          "options": ["low", "medium", "high"],
+          "required": true
+        }
+      ],
+      "optional": [
+        {
+          "key": "heat_sensitive",
+          "type": "boolean",
+          "label": "Sensitive to heat?",
+          "required": false
+        },
+        {
+          "key": "aqi_sensitive",
+          "type": "boolean",
+          "label": "Sensitive to air quality?",
+          "required": false
+        }
+      ]
+    },
+    "driver": {
+      "compulsory": [
+        {
+          "key": "driving_distance_km",
+          "type": "range",
+          "min": 1,
+          "max": 500,
+          "step": 5,
+          "label": "Daily travel distance (km)",
+          "required": true
+        },
+        {
+          "key": "vehicle_type",
+          "type": "select",
+          "options": ["bike", "car", "truck", "bus"],
+          "label": "Vehicle type",
+          "required": true
+        },
+        {
+          "key": "travel_time",
+          "type": "select",
+          "options": ["morning", "afternoon", "evening", "night", "full_day"],
+          "label": "Driving time",
+          "required": true
+        }
+      ],
+      "optional": [
+        {
+          "key": "long_route",
+          "type": "boolean",
+          "label": "Long highway routes?",
+          "required": false
+        }
+      ]
+    },
+    "worker": {
+      "compulsory": [
+        {
+          "key": "work_type",
+          "type": "select",
+          "options": ["construction", "field", "manual_labor"],
+          "label": "Type of work",
+          "required": true
+        },
+        {
+          "key": "work_hours",
+          "type": "select",
+          "options": ["morning", "afternoon", "full_day"],
+          "label": "Working hours",
+          "required": true
+        },
+        {
+          "key": "outdoor_exposure",
+          "type": "range",
+          "min": 0,
+          "max": 100,
+          "step": 10,
+          "label": "Outdoor exposure (%)",
+          "required": true
+        }
+      ],
+      "optional": [
+        {
+          "key": "has_shelter",
+          "type": "boolean",
+          "label": "Access to shelter?",
+          "required": false
+        }
+      ]
+    },
+    "office_employee": {
+      "compulsory": [
+        {
+          "key": "commute_distance_km",
+          "type": "range",
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "label": "Distance to office (km)",
+          "required": true
+        },
+        {
+          "key": "transport_mode",
+          "type": "select",
+          "options": ["walking", "bike", "car", "bus", "train"],
+          "label": "Transport mode",
+          "required": true
+        },
+        {
+          "key": "office_timing",
+          "type": "select",
+          "options": ["morning", "day", "evening"],
+          "label": "Office timing",
+          "required": true
+        }
+      ],
+      "optional": [
+        {
+          "key": "traffic_sensitive",
+          "type": "boolean",
+          "label": "Want traffic/weather alerts?",
+          "required": false
+        }
+      ]
+    },
+    "farmer": {
+      "compulsory": [
+        {
+          "key": "crop_type",
+          "type": "select",
+          "options": ["wheat", "rice", "soybean", "cotton", "vegetables", "other"],
+          "label": "Crop type",
+          "required": true
+        },
+        {
+          "key": "farming_stage",
+          "type": "select",
+          "options": ["sowing", "growing", "harvesting", "spraying"],
+          "label": "Current activity",
+          "required": true
+        },
+        {
+          "key": "irrigation",
+          "type": "select",
+          "options": ["rainfed", "manual", "drip", "sprinkler"],
+          "label": "Irrigation type",
+          "required": true
+        }
+      ],
+      "optional": [
+        {
+          "key": "farm_size",
+          "type": "range",
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "label": "Farm size (acres)",
+          "required": false
+        },
+        {
+          "key": "crop_type_other",
+          "type": "text",
+          "label": "Specify crop type",
+          "required": true,
+          "depends_on": {
+            "key": "crop_type",
+            "value": "other"
+          }
+        }
+      ]
+    },
+    "delivery": {
+      "compulsory": [
+        {
+          "key": "delivery_mode",
+          "type": "select",
+          "options": ["bike", "cycle", "van"],
+          "label": "Delivery vehicle",
+          "required": true
+        },
+        {
+          "key": "delivery_hours",
+          "type": "select",
+          "options": ["morning", "afternoon", "evening", "full_day"],
+          "label": "Working hours",
+          "required": true
+        },
+        {
+          "key": "daily_distance",
+          "type": "range",
+          "min": 1,
+          "max": 200,
+          "step": 5,
+          "label": "Daily delivery distance (km)",
+          "required": true
+        }
+      ],
+      "optional": [
+        {
+          "key": "rain_impact",
+          "type": "boolean",
+          "label": "Rain affects delivery?",
+          "required": false
+        }
+      ]
+    },
+    "senior_citizen": {
+      "compulsory": [
+        {
+          "key": "health_sensitivity",
+          "type": "select",
+          "options": ["low", "medium", "high"],
+          "label": "Health sensitivity",
+          "required": true
+        }
+      ],
+      "optional": [
+        {
+          "key": "aqi_sensitive",
+          "type": "boolean",
+          "label": "Sensitive to air quality?",
+          "required": false
+        },
+        {
+          "key": "heat_sensitive",
+          "type": "boolean",
+          "label": "Sensitive to heat?",
+          "required": false
+        }
+      ]
+    },
+    "student": {
+      "compulsory": [
+        {
+          "key": "travel_mode",
+          "type": "select",
+          "options": ["walking", "bike", "bus", "car"],
+          "label": "Travel mode",
+          "required": true
+        },
+        {
+          "key": "school_time",
+          "type": "select",
+          "options": ["morning", "afternoon"],
+          "label": "School timing",
+          "required": true
+        }
+      ],
+      "optional": [
+        {
+          "key": "outdoor_play",
+          "type": "boolean",
+          "label": "Outdoor activities?",
+          "required": false
+        }
+      ]
+    },
+    "business_owner": {
+      "compulsory": [
+        {
+          "key": "business_type",
+          "type": "select",
+          "options": ["retail", "food", "outdoor_shop", "warehouse"],
+          "label": "Business type",
+          "required": true
+        },
+        {
+          "key": "operating_hours",
+          "type": "select",
+          "options": ["morning", "day", "evening", "full_day"],
+          "label": "Operating hours",
+          "required": true
+        }
+      ],
+      "optional": [
+        {
+          "key": "weather_impact",
+          "type": "boolean",
+          "label": "Weather affects business?",
+          "required": false
+        }
+      ]
+    },
+    "other": {
+      "compulsory": [],
+      "optional": [
+        {
+          "key": "custom_profile",
+          "type": "text",
+          "label": "Describe your usage",
+          "required": false
+        }
+      ]
+    }
+  }
+}

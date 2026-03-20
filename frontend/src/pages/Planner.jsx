@@ -4,6 +4,8 @@ import { useAuth } from "../context/AuthContext";
 import useLocation from "../hooks/useLocation";
 import useWeather from "../hooks/useWeather";
 import { insightService } from "../services/insightService";
+import { isSupabaseConfigured, supabase } from "../services/supabaseClient";
+import profileConfig from "../config/userProfileConfig.json";
 import GlassCard from "../components/GlassCard";
 import Loader from "../components/Loader";
 import { 
@@ -62,8 +64,26 @@ const DURATION_OPTIONS = [
   { value: 10, label: "Extended" },
 ];
 
+const buildProfileQuestions = (persona) => {
+  const personaConfig = profileConfig.user_types?.[persona] || profileConfig.user_types?.general;
+  const compulsory = personaConfig?.compulsory || [];
+  const optional = personaConfig?.optional || [];
+  return [...compulsory, ...optional];
+};
+
+const isAnswerProvided = (value) => {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  return true;
+};
+
+const isQuestionActive = (question, answers) => {
+  if (!question.depends_on) return true;
+  return answers?.[question.depends_on.key] === question.depends_on.value;
+};
+
 export default function Planner() {
-  const { isLoggedIn, user } = useAuth();
+  const { isLoggedIn, user, refreshProfile } = useAuth();
   const { location } = useLocation();
   const { data: weatherData, loading: weatherLoading } = useWeather(location?.lat, location?.lon);
 
@@ -75,11 +95,32 @@ export default function Planner() {
   const [risks, setRisks] = useState([]);
   const [duration, setDuration] = useState(4);
   const [notes, setNotes] = useState("");
+
+  // Planner profile state
+  const [showProfileSetup, setShowProfileSetup] = useState(!user?.planner_profile_completed);
+  const [profileAnswers, setProfileAnswers] = useState(user?.planner_profile?.answers || {});
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
   
   // UI state
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [showForm, setShowForm] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+    setProfileAnswers(user?.planner_profile?.answers || {});
+    setShowProfileSetup(!user?.planner_profile_completed);
+  }, [user?.id]);
+
+  const profileQuestions = buildProfileQuestions(user?.persona || "general");
+  const visibleQuestions = profileQuestions.filter((question) =>
+    isQuestionActive(question, profileAnswers)
+  );
+  const missingRequired = visibleQuestions.filter(
+    (question) => question.required && !isAnswerProvided(profileAnswers[question.key])
+  );
+  const plannerReady = Boolean(user?.planner_profile_completed);
 
   // Get persona display name
   const getPersonaLabel = (persona) => {
@@ -119,6 +160,7 @@ export default function Planner() {
         persona: user?.persona || 'general',
         location: location,
         weatherData: weatherData,
+        plannerProfile: user?.planner_profile || null,
         activity: activity === 'other' ? customActivity : activity,
         date: selectedDate,
         timeRange: timeRange,
@@ -146,6 +188,64 @@ export default function Planner() {
   const resetPlan = () => {
     setResult(null);
     setShowForm(true);
+  };
+
+  const updateProfileAnswer = (questionId, value) => {
+    setProfileAnswers((prev) => ({
+      ...prev,
+      [questionId]: value,
+    }));
+  };
+
+  const handleProfileSave = async () => {
+    setProfileError("");
+
+    if (!user?.id) {
+      setProfileError("Please sign in to save your profile.");
+      return;
+    }
+
+    if (missingRequired.length > 0) {
+      setProfileError("Please answer the required questions.");
+      return;
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+      setProfileError("Supabase is not configured.");
+      return;
+    }
+
+    setProfileSaving(true);
+
+    try {
+      const plannerProfile = {
+        persona: user?.persona || "general",
+        answers: profileAnswers,
+        version: profileConfig.version,
+      };
+
+      const { error } = await supabase
+        .from("users")
+        .update({
+          planner_profile: plannerProfile,
+          planner_profile_completed: true,
+          planner_profile_updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id);
+
+      if (error) {
+        setProfileError(error.message || "Failed to save profile.");
+        return;
+      }
+
+      await refreshProfile();
+      setShowProfileSetup(false);
+    } catch (saveError) {
+      console.error("Profile save failed:", saveError);
+      setProfileError("Failed to save profile. Please try again.");
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   // If not logged in, show auth prompt
@@ -214,8 +314,166 @@ export default function Planner() {
         </div>
       </GlassCard>
 
+      {isLoggedIn && (
+        <GlassCard className="p-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-200">Planner profile</h3>
+              <p className="text-xs text-gray-500">
+                Answer a few questions so the AI can tailor predictions.
+              </p>
+            </div>
+            {user?.planner_profile_completed && !showProfileSetup && (
+              <button
+                onClick={() => setShowProfileSetup(true)}
+                className="px-3 py-1.5 text-xs font-semibold text-indigo-300 bg-indigo-500/10 border border-indigo-500/30 rounded-lg hover:bg-indigo-500/20"
+              >
+                Edit
+              </button>
+            )}
+          </div>
+
+          {showProfileSetup && (
+            <div className="mt-4 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {visibleQuestions.map((question) => (
+                  <div key={question.key} className="space-y-1">
+                    <label className="text-xs text-gray-400">
+                      {question.label}
+                      {question.required ? (
+                        <span className="text-red-400"> *</span>
+                      ) : (
+                        <span className="text-gray-500"> (optional)</span>
+                      )}
+                    </label>
+
+                    {question.type === "select" && (
+                      <select
+                        value={profileAnswers[question.key] || ""}
+                        onChange={(e) => updateProfileAnswer(question.key, e.target.value)}
+                        className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                      >
+                        <option value="" disabled>Select</option>
+                        {question.options?.map((option) => (
+                          <option key={option} value={option}>
+                            {option.replace(/_/g, " ")}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    {question.type === "boolean" && (
+                      <select
+                        value={profileAnswers[question.key] === true ? "yes" : profileAnswers[question.key] === false ? "no" : ""}
+                        onChange={(e) => updateProfileAnswer(question.key, e.target.value === "yes")}
+                        className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                      >
+                        <option value="" disabled>Select</option>
+                        <option value="yes">Yes</option>
+                        <option value="no">No</option>
+                      </select>
+                    )}
+
+                    {question.type === "text" && (
+                      <input
+                        type="text"
+                        value={profileAnswers[question.key] || ""}
+                        onChange={(e) => updateProfileAnswer(question.key, e.target.value)}
+                        placeholder={question.placeholder || ""}
+                        className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                      />
+                    )}
+
+                    {question.type === "number" && (
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={profileAnswers[question.key] ?? ""}
+                          min={question.min}
+                          max={question.max}
+                          step={question.step}
+                          onChange={(e) => {
+                            const nextValue = e.target.value === "" ? "" : Number(e.target.value);
+                            updateProfileAnswer(question.key, Number.isNaN(nextValue) ? "" : nextValue);
+                          }}
+                          className="w-full pr-12 px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                        />
+                        {question.unit && (
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">
+                            {question.unit}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {question.type === "range" && (
+                      <div className="space-y-2">
+                        <input
+                          type="range"
+                          min={question.min}
+                          max={question.max}
+                          step={question.step}
+                          value={profileAnswers[question.key] ?? question.min}
+                          onChange={(e) => updateProfileAnswer(question.key, Number(e.target.value))}
+                          className="w-full accent-indigo-500"
+                        />
+                        <div className="flex items-center justify-between text-xs text-gray-500">
+                          <span>{question.min}</span>
+                          <span className="text-gray-300 font-medium">
+                            {profileAnswers[question.key] !== undefined
+                              ? `${profileAnswers[question.key]}${question.unit ? ` ${question.unit}` : ""}`
+                              : "Not set"}
+                          </span>
+                          <span>{question.max}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {missingRequired.length > 0 && (
+                <p className="text-xs text-yellow-400">
+                  {missingRequired.length} required field{missingRequired.length === 1 ? "" : "s"} remaining.
+                </p>
+              )}
+
+              {profileError && (
+                <p className="text-xs text-red-400">{profileError}</p>
+              )}
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={handleProfileSave}
+                  disabled={profileSaving || missingRequired.length > 0}
+                  className="flex-1 py-2.5 rounded-lg bg-indigo-500 text-white text-sm font-semibold hover:bg-indigo-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {profileSaving ? "Saving..." : "Save profile"}
+                </button>
+                {user?.planner_profile_completed && (
+                  <button
+                    onClick={() => setShowProfileSetup(false)}
+                    className="flex-1 py-2.5 rounded-lg bg-gray-800 text-gray-200 text-sm font-semibold border border-gray-700 hover:bg-gray-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {!plannerReady && !showProfileSetup && (
+            <div className="mt-4 p-3 rounded-lg border border-yellow-500/20 bg-yellow-500/10">
+              <p className="text-xs text-yellow-300">
+                Complete your planner profile to unlock AI planning.
+              </p>
+            </div>
+          )}
+        </GlassCard>
+      )}
+
       <AnimatePresence mode="wait">
-        {showForm ? (
+        {showForm && plannerReady ? (
           <motion.div
             key="form"
             initial={{ opacity: 0, y: 20 }}

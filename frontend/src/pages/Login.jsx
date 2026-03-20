@@ -83,7 +83,7 @@ const Login = () => {
       }
 
       login(data);
-      navigate('/');
+      navigate(data?.planner_profile_completed ? '/' : '/planner');
     } catch (error) {
       console.error('Login error:', error);
       setErrors({ general: 'Network error. Please check your connection.' });

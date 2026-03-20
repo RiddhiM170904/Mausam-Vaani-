@@ -287,6 +287,7 @@ const Signup = () => {
           locations: locationsForProfile,
           location: resolvedPrimaryLocation,
           notification_preferences: formData.notificationPreferences,
+          planner_profile_completed: false,
           role: 'user',
         })
         .select('*')
@@ -298,7 +299,7 @@ const Signup = () => {
       }
 
       login(data);
-      navigate('/');
+      navigate('/planner');
     } catch (error) {
       console.error('Registration error:', error);
       setErrors({ general: 'Network error. Please check your connection.' });
