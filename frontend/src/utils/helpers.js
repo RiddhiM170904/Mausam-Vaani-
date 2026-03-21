@@ -34,6 +34,10 @@ export function getWeatherLabel(iconCode) {
  * OWM icon URL
  */
 export function getOWMIconUrl(iconCode, size = 2) {
+  if (!iconCode) return "";
+  if (typeof iconCode === "string" && (iconCode.startsWith("http://") || iconCode.startsWith("https://"))) {
+    return iconCode;
+  }
   return `https://openweathermap.org/img/wn/${iconCode}@${size}x.png`;
 }
 
@@ -47,6 +51,43 @@ export function formatTime(unix) {
     minute: "2-digit",
     hour12: true,
   });
+}
+
+/**
+ * Format an hour label like "14:00" into "2:00 PM".
+ */
+export function formatHourLabel(timeLabel) {
+  if (!timeLabel) return "--";
+  const [hRaw, mRaw] = String(timeLabel).split(":");
+  const hour = Number(hRaw);
+  const minute = Number(mRaw);
+
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return timeLabel;
+  }
+
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
+}
+
+/**
+ * Friendly metric weather units.
+ */
+export function formatTemperatureC(value) {
+  if (value == null || Number.isNaN(Number(value))) return "--";
+  return `${Math.round(Number(value))}\u00B0C`;
+}
+
+export function formatWindKmh(value) {
+  if (value == null || Number.isNaN(Number(value))) return "--";
+  const rounded = Math.round(Number(value) * 10) / 10;
+  return `${rounded} km/h`;
+}
+
+export function formatVisibilityKm(value) {
+  if (value == null || Number.isNaN(Number(value))) return "--";
+  return `${Number(value).toFixed(1)} km`;
 }
 
 /**

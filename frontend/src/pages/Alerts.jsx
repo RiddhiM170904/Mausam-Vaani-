@@ -65,7 +65,7 @@ export default function Alerts() {
           </p>
         </GlassCard>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 px-1 sm:px-0">
           {alerts.map((alert, i) => {
             const config =
               severityConfig[alert.severity] || severityConfig.warning;

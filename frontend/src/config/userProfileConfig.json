@@ -1,5 +1,5 @@
 {
-  "version": "2.0",
+  "version": "2.1",
   "user_types": {
     "general": {
       "compulsory": [
@@ -8,6 +8,13 @@
           "type": "select",
           "label": "Outdoor activity level",
           "options": ["low", "medium", "high"],
+          "required": true
+        },
+        {
+          "key": "typical_outdoor_time",
+          "type": "select",
+          "label": "When are you usually outside?",
+          "options": ["early_morning", "morning", "afternoon", "evening", "night", "varies"],
           "required": true
         }
       ],
@@ -22,6 +29,22 @@
           "key": "aqi_sensitive",
           "type": "boolean",
           "label": "Sensitive to air quality?",
+          "required": false
+        },
+        {
+          "key": "rain_tolerance",
+          "type": "range",
+          "min": 0,
+          "max": 10,
+          "step": 1,
+          "label": "Rain tolerance (0 low, 10 high)",
+          "required": false
+        },
+        {
+          "key": "special_requirements",
+          "type": "text",
+          "label": "Specific weather needs (optional)",
+          "placeholder": "Example: avoid noon heat, prefer low AQI routes",
           "required": false
         }
       ]
@@ -50,6 +73,13 @@
           "options": ["morning", "afternoon", "evening", "night", "full_day"],
           "label": "Driving time",
           "required": true
+        },
+        {
+          "key": "route_type",
+          "type": "select",
+          "options": ["city", "highway", "mixed", "hilly"],
+          "label": "Primary route type",
+          "required": true
         }
       ],
       "optional": [
@@ -57,6 +87,29 @@
           "key": "long_route",
           "type": "boolean",
           "label": "Long highway routes?",
+          "required": false
+        },
+        {
+          "key": "night_driving_frequency",
+          "type": "select",
+          "options": ["never", "rarely", "sometimes", "often", "daily"],
+          "label": "Night driving frequency",
+          "required": false
+        },
+        {
+          "key": "visibility_priority",
+          "type": "range",
+          "min": 1,
+          "max": 10,
+          "step": 1,
+          "label": "How important is visibility forecasting?",
+          "required": false
+        },
+        {
+          "key": "special_requirements",
+          "type": "text",
+          "label": "Specific driving/weather needs (optional)",
+          "placeholder": "Example: avoid fog-prone stretches and heavy rain windows",
           "required": false
         }
       ]
@@ -85,6 +138,13 @@
           "step": 10,
           "label": "Outdoor exposure (%)",
           "required": true
+        },
+        {
+          "key": "physical_intensity",
+          "type": "select",
+          "options": ["low", "moderate", "high", "very_high"],
+          "label": "Work intensity",
+          "required": true
         }
       ],
       "optional": [
@@ -92,6 +152,26 @@
           "key": "has_shelter",
           "type": "boolean",
           "label": "Access to shelter?",
+          "required": false
+        },
+        {
+          "key": "protective_gear",
+          "type": "boolean",
+          "label": "Do you usually use protective gear?",
+          "required": false
+        },
+        {
+          "key": "break_flexibility",
+          "type": "select",
+          "options": ["low", "medium", "high"],
+          "label": "Can work breaks be shifted due to weather?",
+          "required": false
+        },
+        {
+          "key": "special_requirements",
+          "type": "text",
+          "label": "Specific work/weather needs (optional)",
+          "placeholder": "Example: avoid peak heat windows for heavy tasks",
           "required": false
         }
       ]
@@ -120,6 +200,13 @@
           "options": ["morning", "day", "evening"],
           "label": "Office timing",
           "required": true
+        },
+        {
+          "key": "commute_flexibility",
+          "type": "select",
+          "options": ["fixed", "slightly_flexible", "flexible", "work_from_home_possible"],
+          "label": "Commute flexibility",
+          "required": true
         }
       ],
       "optional": [
@@ -127,6 +214,23 @@
           "key": "traffic_sensitive",
           "type": "boolean",
           "label": "Want traffic/weather alerts?",
+          "required": false
+        },
+        {
+          "key": "last_mile_walk_minutes",
+          "type": "number",
+          "min": 0,
+          "max": 120,
+          "step": 5,
+          "unit": "min",
+          "label": "Last-mile walking time",
+          "required": false
+        },
+        {
+          "key": "special_requirements",
+          "type": "text",
+          "label": "Specific commute/weather needs (optional)",
+          "placeholder": "Example: keep me away from heavy-rain commute windows",
           "required": false
         }
       ]
@@ -153,6 +257,13 @@
           "options": ["rainfed", "manual", "drip", "sprinkler"],
           "label": "Irrigation type",
           "required": true
+        },
+        {
+          "key": "soil_drainage",
+          "type": "select",
+          "options": ["poor", "moderate", "good"],
+          "label": "Soil drainage",
+          "required": true
         }
       ],
       "optional": [
@@ -174,6 +285,19 @@
             "key": "crop_type",
             "value": "other"
           }
+        },
+        {
+          "key": "sensitive_to_unseasonal_rain",
+          "type": "boolean",
+          "label": "Is unseasonal rain a major risk?",
+          "required": false
+        },
+        {
+          "key": "special_requirements",
+          "type": "text",
+          "label": "Specific crop/weather needs (optional)",
+          "placeholder": "Example: alert before spraying when wind is high",
+          "required": false
         }
       ]
     },
@@ -201,6 +325,13 @@
           "step": 5,
           "label": "Daily delivery distance (km)",
           "required": true
+        },
+        {
+          "key": "delivery_deadline_strictness",
+          "type": "select",
+          "options": ["low", "medium", "high", "very_high"],
+          "label": "How strict are delivery time windows?",
+          "required": true
         }
       ],
       "optional": [
@@ -208,6 +339,19 @@
           "key": "rain_impact",
           "type": "boolean",
           "label": "Rain affects delivery?",
+          "required": false
+        },
+        {
+          "key": "fragile_shipments",
+          "type": "boolean",
+          "label": "Do you often carry fragile items?",
+          "required": false
+        },
+        {
+          "key": "special_requirements",
+          "type": "text",
+          "label": "Specific delivery/weather needs (optional)",
+          "placeholder": "Example: prioritize routes with less waterlogging",
           "required": false
         }
       ]
@@ -219,6 +363,13 @@
           "type": "select",
           "options": ["low", "medium", "high"],
           "label": "Health sensitivity",
+          "required": true
+        },
+        {
+          "key": "outdoor_frequency",
+          "type": "select",
+          "options": ["rarely", "few_times_week", "daily"],
+          "label": "How often do you go outdoors?",
           "required": true
         }
       ],
@@ -233,6 +384,19 @@
           "key": "heat_sensitive",
           "type": "boolean",
           "label": "Sensitive to heat?",
+          "required": false
+        },
+        {
+          "key": "cold_sensitive",
+          "type": "boolean",
+          "label": "Sensitive to cold?",
+          "required": false
+        },
+        {
+          "key": "special_requirements",
+          "type": "text",
+          "label": "Specific health/weather needs (optional)",
+          "placeholder": "Example: avoid outdoor alerts when AQI is above moderate",
           "required": false
         }
       ]
@@ -252,6 +416,16 @@
           "options": ["morning", "afternoon"],
           "label": "School timing",
           "required": true
+        },
+        {
+          "key": "commute_duration_minutes",
+          "type": "number",
+          "min": 5,
+          "max": 180,
+          "step": 5,
+          "unit": "min",
+          "label": "Typical one-way commute time",
+          "required": true
         }
       ],
       "optional": [
@@ -259,6 +433,19 @@
           "key": "outdoor_play",
           "type": "boolean",
           "label": "Outdoor activities?",
+          "required": false
+        },
+        {
+          "key": "exam_period",
+          "type": "boolean",
+          "label": "Are you in an exam period?",
+          "required": false
+        },
+        {
+          "key": "special_requirements",
+          "type": "text",
+          "label": "Specific study/travel weather needs (optional)",
+          "placeholder": "Example: avoid heavy rain windows before school",
           "required": false
         }
       ]
@@ -278,6 +465,13 @@
           "options": ["morning", "day", "evening", "full_day"],
           "label": "Operating hours",
           "required": true
+        },
+        {
+          "key": "footfall_dependence",
+          "type": "select",
+          "options": ["low", "medium", "high"],
+          "label": "How weather-sensitive is customer footfall?",
+          "required": true
         }
       ],
       "optional": [
@@ -286,16 +480,45 @@
           "type": "boolean",
           "label": "Weather affects business?",
           "required": false
+        },
+        {
+          "key": "inventory_weather_sensitive",
+          "type": "boolean",
+          "label": "Is inventory weather-sensitive?",
+          "required": false
+        },
+        {
+          "key": "special_requirements",
+          "type": "text",
+          "label": "Specific business/weather needs (optional)",
+          "placeholder": "Example: alert for likely low-footfall rain periods",
+          "required": false
         }
       ]
     },
     "other": {
-      "compulsory": [],
+      "compulsory": [
+        {
+          "key": "custom_usage_type",
+          "type": "text",
+          "label": "Describe your primary use case",
+          "placeholder": "Example: mountain hiking, boating, event logistics",
+          "required": true
+        }
+      ],
       "optional": [
+        {
+          "key": "risk_priority",
+          "type": "select",
+          "label": "Top risk to avoid",
+          "options": ["rain", "heat", "wind", "fog", "air_quality", "storm", "other"],
+          "required": false
+        },
         {
           "key": "custom_profile",
           "type": "text",
-          "label": "Describe your usage",
+          "label": "Additional weather planning details",
+          "placeholder": "Add any custom constraints you want the planner to consider",
           "required": false
         }
       ]

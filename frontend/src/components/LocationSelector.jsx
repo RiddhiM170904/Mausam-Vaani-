@@ -94,7 +94,7 @@ const LocationSelector = ({ isOpen, onClose, onLocationSelect }) => {
 
   // Debug logging
   useEffect(() => {
-    console.log('LocationSelector isOpen changed:', isOpen);
+    console.info('[LocationDebug] LocationSelector visibility changed', { isOpen });
     if (isOpen) {
       // Prevent body scroll when modal is open
       document.body.style.overflow = 'hidden';
@@ -117,7 +117,7 @@ const LocationSelector = ({ isOpen, onClose, onLocationSelect }) => {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 bg-black/50 backdrop-blur-lg z-[100] flex items-center justify-center p-4"
+        className="fixed inset-0 z-100 flex items-center justify-center bg-black/50 p-4 backdrop-blur-lg"
         onClick={onClose}
       >
         <motion.div
@@ -178,7 +178,7 @@ const LocationSelector = ({ isOpen, onClose, onLocationSelect }) => {
             {/* Error */}
             {error && (
               <div className="flex items-center gap-2 p-3 mb-4 border bg-red-500/10 border-red-500/30 rounded-xl">
-                <AlertCircle className="flex-shrink-0 w-4 h-4 text-red-400" />
+                <AlertCircle className="h-4 w-4 shrink-0 text-red-400" />
                 <p className="text-sm text-red-400">{error}</p>
               </div>
             )}

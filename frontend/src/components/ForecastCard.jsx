@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import GlassCard from "./GlassCard";
-import { formatDay, getOWMIconUrl } from "../utils/helpers";
+import { formatDay, formatTemperatureC, getOWMIconUrl } from "../utils/helpers";
 
 /**
  * 7-day forecast list.
@@ -18,7 +18,7 @@ export default function ForecastCard({ days = [] }) {
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: i * 0.06 }}
-            className="flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/[0.04] transition-colors"
+            className="flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-white/4 transition-colors"
           >
             <span className="text-sm text-gray-300 w-24 font-medium">
               {formatDay(day.date)}
@@ -32,8 +32,8 @@ export default function ForecastCard({ days = [] }) {
               <span className="text-xs text-gray-500 hidden sm:block">{day.condition}</span>
             </div>
             <div className="text-sm text-right">
-              <span className="text-white font-semibold">{day.tempMax}°</span>
-              <span className="text-gray-500 ml-2">{day.tempMin}°</span>
+              <span className="text-white font-semibold">{formatTemperatureC(day.tempMax)}</span>
+              <span className="text-gray-500 ml-2">{formatTemperatureC(day.tempMin)}</span>
             </div>
           </motion.div>
         ))}

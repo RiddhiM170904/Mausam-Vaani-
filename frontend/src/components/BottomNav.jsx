@@ -1,27 +1,35 @@
 import { NavLink } from "react-router-dom";
-import { HiOutlineHome, HiOutlineCalendarDays, HiOutlineMap, HiOutlineBell, HiOutlineSparkles } from "react-icons/hi2";
+import {
+  HiOutlineHome,
+  HiOutlineCalendarDays,
+  HiOutlineMap,
+  HiOutlineBell,
+  HiOutlineSparkles,
+  HiOutlineUser,
+} from "react-icons/hi2";
 
 const links = [
   { to: "/", icon: HiOutlineHome, label: "Home" },
   { to: "/forecast", icon: HiOutlineCalendarDays, label: "Forecast" },
-  { to: "/map", icon: HiOutlineMap, label: "Map" },
   { to: "/alerts", icon: HiOutlineBell, label: "Alerts" },
-  { to: "/planner", icon: HiOutlineSparkles, label: "Planner" },
+  { to: "/insights", icon: HiOutlineSparkles, label: "Insights" },
+  { to: "/map", icon: HiOutlineMap, label: "Map" },
+  { to: "/profile", icon: HiOutlineUser, label: "Profile" },
 ];
 
 export default function BottomNav() {
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-50 md:hidden bg-black/90 backdrop-blur-xl border-t border-white/5">
-      <div className="flex items-center justify-around h-16 px-2">
+    <nav className="fixed bottom-0 inset-x-0 z-50 border-t border-indigo-400/15 bg-slate-950/80 backdrop-blur-xl md:hidden">
+      <div className="flex h-16 items-center gap-1 overflow-x-auto px-2 hide-scrollbar">
         {links.map((link) => (
           <NavLink
             key={link.to}
             to={link.to}
             className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all duration-200 ${
+              `flex min-w-17 flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 transition-all duration-200 ${
                 isActive
-                  ? "text-indigo-400"
-                  : "text-gray-500 hover:text-gray-300"
+                  ? "bg-indigo-400/10 text-indigo-300"
+                  : "text-gray-500 hover:bg-indigo-400/8 hover:text-gray-300"
               }`
             }
           >

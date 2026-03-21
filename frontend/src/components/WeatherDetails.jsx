@@ -1,5 +1,5 @@
 import GlassCard from "./GlassCard";
-import { formatTime, windDescription } from "../utils/helpers";
+import { formatTime, formatVisibilityKm, formatWindKmh, windDescription } from "../utils/helpers";
 import {
   WiHumidity,
   WiStrongWind,
@@ -9,6 +9,15 @@ import {
   WiDaySunny,
 } from "react-icons/wi";
 import { HiOutlineEye } from "react-icons/hi2";
+
+const aqiLabel = {
+  1: "Good",
+  2: "Fair",
+  3: "Moderate",
+  4: "Poor",
+  5: "Very Poor",
+  6: "Hazardous",
+};
 
 /**
  * Grid of weather detail metrics.
@@ -25,13 +34,13 @@ export default function WeatherDetails({ data }) {
     {
       icon: <WiStrongWind size={28} className="text-teal-400" />,
       label: "Wind",
-      value: `${data.wind} km/h`,
+      value: formatWindKmh(data.wind),
       sub: windDescription(data.wind),
     },
     {
       icon: <HiOutlineEye size={22} className="text-gray-400" />,
       label: "Visibility",
-      value: `${data.visibility} km`,
+      value: formatVisibilityKm(data.visibility),
     },
     {
       icon: <WiBarometer size={28} className="text-purple-400" />,
@@ -58,8 +67,16 @@ export default function WeatherDetails({ data }) {
     });
   }
 
+  if (data.aqi) {
+    items.splice(3, 0, {
+      icon: <span className="inline-block h-3 w-3 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.75)]" />,
+      label: "AQI",
+      value: `${data.aqi} (${aqiLabel[data.aqi] || "Unknown"})`,
+    });
+  }
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+    <div className="grid grid-cols-1 gap-4 px-1 sm:grid-cols-2 sm:px-0 lg:grid-cols-3 xl:grid-cols-4">
       {items.map((item) => (
         <GlassCard key={item.label} className="p-4 flex flex-col gap-2" hover>
           <div className="flex items-center gap-2">

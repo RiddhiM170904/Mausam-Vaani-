@@ -86,6 +86,8 @@ export default function Planner() {
   const { isLoggedIn, user, refreshProfile } = useAuth();
   const { location } = useLocation();
   const { data: weatherData, loading: weatherLoading } = useWeather(location?.lat, location?.lon);
+  const [profileUserType, setProfileUserType] = useState(user?.persona || "general");
+  const [profileUserTypeLabel, setProfileUserTypeLabel] = useState(user?.other_persona_text || "");
 
   // Form state
   const [activity, setActivity] = useState("");
@@ -99,8 +101,11 @@ export default function Planner() {
   // Planner profile state
   const [showProfileSetup, setShowProfileSetup] = useState(!user?.planner_profile_completed);
   const [profileAnswers, setProfileAnswers] = useState(user?.planner_profile?.answers || {});
+  const [profileCompleted, setProfileCompleted] = useState(Boolean(user?.planner_profile_completed));
   const [profileSaving, setProfileSaving] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState("");
+  const [profileSuccess, setProfileSuccess] = useState("");
   
   // UI state
   const [loading, setLoading] = useState(false);
@@ -109,18 +114,82 @@ export default function Planner() {
 
   useEffect(() => {
     if (!user) return;
-    setProfileAnswers(user?.planner_profile?.answers || {});
-    setShowProfileSetup(!user?.planner_profile_completed);
-  }, [user?.id]);
 
-  const profileQuestions = buildProfileQuestions(user?.persona || "general");
+    const nextPersona = user?.persona || "general";
+    setProfileUserType(nextPersona);
+    setProfileUserTypeLabel(user?.other_persona_text || "");
+    setProfileAnswers(user?.planner_profile?.answers || {});
+    setProfileCompleted(Boolean(user?.planner_profile_completed));
+    setShowProfileSetup(!user?.planner_profile_completed);
+    setProfileSuccess("");
+  }, [user?.id, user?.persona, user?.planner_profile_completed]);
+
+  useEffect(() => {
+    if (!profileSuccess) return;
+
+    const timeoutId = setTimeout(() => {
+      setProfileSuccess("");
+    }, 4000);
+
+    return () => clearTimeout(timeoutId);
+  }, [profileSuccess]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !user?.id || !isSupabaseConfigured || !supabase) return;
+
+    let isMounted = true;
+    const fetchPlannerProfile = async () => {
+      setProfileLoading(true);
+      setProfileError("");
+      setProfileSuccess("");
+
+      try {
+        const { data, error } = await supabase
+          .from("users")
+          .select("persona, other_persona_text, planner_profile, planner_profile_completed")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (error) {
+          if (isMounted) {
+            setProfileError(error.message || "Failed to load planner profile.");
+          }
+          return;
+        }
+
+        if (!isMounted || !data) return;
+
+        setProfileUserType(data.persona || "general");
+        setProfileUserTypeLabel(data.other_persona_text || "");
+        setProfileAnswers(data?.planner_profile?.answers || {});
+        setProfileCompleted(Boolean(data?.planner_profile_completed));
+        setShowProfileSetup(!data?.planner_profile_completed);
+      } catch {
+        if (isMounted) {
+          setProfileError("Failed to load planner profile. Please try again.");
+        }
+      } finally {
+        if (isMounted) {
+          setProfileLoading(false);
+        }
+      }
+    };
+
+    fetchPlannerProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isLoggedIn, user?.id]);
+
+  const profileQuestions = buildProfileQuestions(profileUserType);
   const visibleQuestions = profileQuestions.filter((question) =>
     isQuestionActive(question, profileAnswers)
   );
   const missingRequired = visibleQuestions.filter(
     (question) => question.required && !isAnswerProvided(profileAnswers[question.key])
   );
-  const plannerReady = Boolean(user?.planner_profile_completed);
+  const plannerReady = profileCompleted && !profileLoading;
 
   // Get persona display name
   const getPersonaLabel = (persona) => {
@@ -157,10 +226,14 @@ export default function Planner() {
     
     try {
       const plannerData = {
-        persona: user?.persona || 'general',
+        persona: profileUserType || 'general',
         location: location,
         weatherData: weatherData,
-        plannerProfile: user?.planner_profile || null,
+        plannerProfile: {
+          persona: profileUserType || 'general',
+          answers: profileAnswers,
+          version: profileConfig.version,
+        },
         activity: activity === 'other' ? customActivity : activity,
         date: selectedDate,
         timeRange: timeRange,
@@ -199,6 +272,7 @@ export default function Planner() {
 
   const handleProfileSave = async () => {
     setProfileError("");
+    setProfileSuccess("");
 
     if (!user?.id) {
       setProfileError("Please sign in to save your profile.");
@@ -219,8 +293,11 @@ export default function Planner() {
 
     try {
       const plannerProfile = {
-        persona: user?.persona || "general",
+        persona: profileUserType || "general",
+        persona_label: profileUserTypeLabel || null,
         answers: profileAnswers,
+        question_set_version: profileConfig.version,
+        completed_at: new Date().toISOString(),
         version: profileConfig.version,
       };
 
@@ -239,7 +316,9 @@ export default function Planner() {
       }
 
       await refreshProfile();
+      setProfileCompleted(true);
       setShowProfileSetup(false);
+      setProfileSuccess("Profile saved successfully.");
     } catch (saveError) {
       console.error("Profile save failed:", saveError);
       setProfileError("Failed to save profile. Please try again.");
@@ -256,17 +335,17 @@ export default function Planner() {
         animate={{ opacity: 1 }}
         className="flex flex-col items-center justify-center py-20 text-center"
       >
-        <div className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center mb-6">
+        <div className="flex items-center justify-center w-20 h-20 mb-6 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl">
           <Sparkles className="w-10 h-10 text-white" />
         </div>
-        <h2 className="text-2xl font-bold text-white mb-3">AI Weather Planner</h2>
-        <p className="text-gray-400 text-sm max-w-sm mb-6">
+        <h2 className="mb-3 text-2xl font-bold text-white">AI Weather Planner</h2>
+        <p className="max-w-sm mb-6 text-sm text-gray-400">
           Get personalized weather-smart recommendations for your activities.
           Sign in to access the AI Planner.
         </p>
         <a
           href="/login"
-          className="px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl font-medium hover:from-indigo-600 hover:to-purple-700 transition-all flex items-center gap-2"
+          className="flex items-center gap-2 px-6 py-3 font-medium text-white transition-all bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl hover:from-indigo-600 hover:to-purple-700"
         >
           Sign In to Continue
           <ArrowRight className="w-4 h-4" />
@@ -281,7 +360,7 @@ export default function Planner() {
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="space-y-6 max-w-2xl mx-auto"
+      className="max-w-2xl mx-auto space-y-6"
     >
       {/* Header */}
       <div className="text-center">
@@ -289,17 +368,17 @@ export default function Planner() {
           <Sparkles className="w-6 h-6 text-indigo-400" />
           <h1 className="text-2xl font-bold text-white">AI Weather Planner</h1>
         </div>
-        <p className="text-gray-400 text-sm">Plan your day smarter with weather insights</p>
+        <p className="text-sm text-gray-400">Plan your day smarter with weather insights</p>
       </div>
 
       {/* User Context Card */}
       <GlassCard className="p-4">
-        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Your Profile</h3>
+        <h3 className="mb-3 text-xs font-semibold tracking-wider text-gray-500 uppercase">Your Profile</h3>
         <div className="grid grid-cols-3 gap-4 text-center">
           <div className="flex flex-col items-center gap-1">
             <User className="w-5 h-5 text-indigo-400" />
             <span className="text-xs text-gray-400">Persona</span>
-            <span className="text-sm text-white font-medium">{getPersonaLabel(user?.persona)}</span>
+            <span className="text-sm font-medium text-white">{getPersonaLabel(profileUserType)}</span>
           </div>
           <div className="flex flex-col items-center gap-1">
             <MapPin className="w-5 h-5 text-blue-400" />
@@ -309,7 +388,7 @@ export default function Planner() {
           <div className="flex flex-col items-center gap-1">
             <Thermometer className="w-5 h-5 text-orange-400" />
             <span className="text-xs text-gray-400">Now</span>
-            <span className="text-sm text-white font-medium">{weatherData?.current?.temp || '--'}°C</span>
+            <span className="text-sm font-medium text-white">{weatherData?.current?.temp || '--'}°C</span>
           </div>
         </div>
       </GlassCard>
@@ -322,10 +401,16 @@ export default function Planner() {
               <p className="text-xs text-gray-500">
                 Answer a few questions so the AI can tailor predictions.
               </p>
+              <p className="mt-1 text-xs text-indigo-300">
+                User type: {getPersonaLabel(profileUserType)}{profileUserType === "other" && profileUserTypeLabel ? ` (${profileUserTypeLabel})` : ""}
+              </p>
             </div>
-            {user?.planner_profile_completed && !showProfileSetup && (
+            {profileCompleted && !showProfileSetup && (
               <button
-                onClick={() => setShowProfileSetup(true)}
+                onClick={() => {
+                  setProfileSuccess("");
+                  setShowProfileSetup(true);
+                }}
                 className="px-3 py-1.5 text-xs font-semibold text-indigo-300 bg-indigo-500/10 border border-indigo-500/30 rounded-lg hover:bg-indigo-500/20"
               >
                 Edit
@@ -333,9 +418,15 @@ export default function Planner() {
             )}
           </div>
 
-          {showProfileSetup && (
+          {profileLoading && (
+            <div className="mt-4">
+              <Loader text="Loading profile questions..." />
+            </div>
+          )}
+
+          {showProfileSetup && !profileLoading && (
             <div className="mt-4 space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-4 px-1 sm:grid-cols-2 sm:gap-3 sm:px-0">
                 {visibleQuestions.map((question) => (
                   <div key={question.key} className="space-y-1">
                     <label className="text-xs text-gray-400">
@@ -351,7 +442,7 @@ export default function Planner() {
                       <select
                         value={profileAnswers[question.key] || ""}
                         onChange={(e) => updateProfileAnswer(question.key, e.target.value)}
-                        className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                        className="w-full px-3 py-2 text-sm text-white border border-gray-700 rounded-lg bg-gray-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       >
                         <option value="" disabled>Select</option>
                         {question.options?.map((option) => (
@@ -366,7 +457,7 @@ export default function Planner() {
                       <select
                         value={profileAnswers[question.key] === true ? "yes" : profileAnswers[question.key] === false ? "no" : ""}
                         onChange={(e) => updateProfileAnswer(question.key, e.target.value === "yes")}
-                        className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                        className="w-full px-3 py-2 text-sm text-white border border-gray-700 rounded-lg bg-gray-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       >
                         <option value="" disabled>Select</option>
                         <option value="yes">Yes</option>
@@ -380,7 +471,7 @@ export default function Planner() {
                         value={profileAnswers[question.key] || ""}
                         onChange={(e) => updateProfileAnswer(question.key, e.target.value)}
                         placeholder={question.placeholder || ""}
-                        className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                        className="w-full px-3 py-2 text-sm text-white placeholder-gray-500 border border-gray-700 rounded-lg bg-gray-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                       />
                     )}
 
@@ -396,10 +487,10 @@ export default function Planner() {
                             const nextValue = e.target.value === "" ? "" : Number(e.target.value);
                             updateProfileAnswer(question.key, Number.isNaN(nextValue) ? "" : nextValue);
                           }}
-                          className="w-full pr-12 px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                          className="w-full px-3 py-2 pr-12 text-sm text-white placeholder-gray-500 border border-gray-700 rounded-lg bg-gray-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                         />
                         {question.unit && (
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">
+                          <span className="absolute text-xs text-gray-500 -translate-y-1/2 right-3 top-1/2">
                             {question.unit}
                           </span>
                         )}
@@ -419,7 +510,7 @@ export default function Planner() {
                         />
                         <div className="flex items-center justify-between text-xs text-gray-500">
                           <span>{question.min}</span>
-                          <span className="text-gray-300 font-medium">
+                          <span className="font-medium text-gray-300">
                             {profileAnswers[question.key] !== undefined
                               ? `${profileAnswers[question.key]}${question.unit ? ` ${question.unit}` : ""}`
                               : "Not set"}
@@ -442,7 +533,7 @@ export default function Planner() {
                 <p className="text-xs text-red-400">{profileError}</p>
               )}
 
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row">
                 <button
                   onClick={handleProfileSave}
                   disabled={profileSaving || missingRequired.length > 0}
@@ -450,7 +541,7 @@ export default function Planner() {
                 >
                   {profileSaving ? "Saving..." : "Save profile"}
                 </button>
-                {user?.planner_profile_completed && (
+                {profileCompleted && (
                   <button
                     onClick={() => setShowProfileSetup(false)}
                     className="flex-1 py-2.5 rounded-lg bg-gray-800 text-gray-200 text-sm font-semibold border border-gray-700 hover:bg-gray-700 transition-colors"
@@ -462,8 +553,12 @@ export default function Planner() {
             </div>
           )}
 
+          {profileSuccess && (
+            <p className="mt-4 text-xs text-green-400">{profileSuccess}</p>
+          )}
+
           {!plannerReady && !showProfileSetup && (
-            <div className="mt-4 p-3 rounded-lg border border-yellow-500/20 bg-yellow-500/10">
+            <div className="p-3 mt-4 border rounded-lg border-yellow-500/20 bg-yellow-500/10">
               <p className="text-xs text-yellow-300">
                 Complete your planner profile to unlock AI planning.
               </p>
@@ -483,7 +578,7 @@ export default function Planner() {
           >
             {/* Activity Selection */}
             <GlassCard className="p-5">
-              <h3 className="text-sm font-semibold text-gray-300 mb-4 flex items-center gap-2">
+              <h3 className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-300">
                 <Briefcase className="w-4 h-4 text-indigo-400" />
                 What are you planning?
               </h3>
@@ -498,7 +593,7 @@ export default function Planner() {
                         : "bg-gray-800/50 border-gray-700/50 text-gray-400 hover:bg-gray-700/50 hover:text-white"
                     }`}
                   >
-                    <span className="text-xl block mb-1">{act.emoji}</span>
+                    <span className="block mb-1 text-xl">{act.emoji}</span>
                     <span className="text-[10px] font-medium">{act.label}</span>
                   </button>
                 ))}
@@ -516,7 +611,7 @@ export default function Planner() {
                     value={customActivity}
                     onChange={(e) => setCustomActivity(e.target.value)}
                     placeholder="Describe your activity..."
-                    className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    className="w-full px-4 py-3 text-sm text-white placeholder-gray-500 border border-gray-700 bg-gray-800/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </motion.div>
               )}
@@ -524,42 +619,42 @@ export default function Planner() {
 
             {/* Date and Time */}
             <GlassCard className="p-5">
-              <h3 className="text-sm font-semibold text-gray-300 mb-4 flex items-center gap-2">
+              <h3 className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-300">
                 <Calendar className="w-4 h-4 text-indigo-400" />
                 When?
               </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 {/* Date picker */}
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Date</label>
+                  <label className="block mb-1 text-xs text-gray-500">Date</label>
                   <input
                     type="date"
                     value={selectedDate}
                     onChange={(e) => setSelectedDate(e.target.value)}
                     min={new Date().toISOString().split('T')[0]}
-                    className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    className="w-full px-3 py-2 text-sm text-white border border-gray-700 rounded-lg bg-gray-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
                 
                 {/* Start time */}
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">Start Time</label>
+                  <label className="block mb-1 text-xs text-gray-500">Start Time</label>
                   <input
                     type="time"
                     value={timeRange.start}
                     onChange={(e) => setTimeRange(prev => ({ ...prev, start: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    className="w-full px-3 py-2 text-sm text-white border border-gray-700 rounded-lg bg-gray-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
                 
                 {/* End time */}
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 block">End Time</label>
+                  <label className="block mb-1 text-xs text-gray-500">End Time</label>
                   <input
                     type="time"
                     value={timeRange.end}
                     onChange={(e) => setTimeRange(prev => ({ ...prev, end: e.target.value }))}
-                    className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    className="w-full px-3 py-2 text-sm text-white border border-gray-700 rounded-lg bg-gray-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
               </div>
@@ -567,9 +662,9 @@ export default function Planner() {
 
             {/* Risk Priorities */}
             <GlassCard className="p-5">
-              <h3 className="text-sm font-semibold text-gray-300 mb-4 flex items-center gap-2">
+              <h3 className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-300">
                 <AlertTriangle className="w-4 h-4 text-yellow-400" />
-                What to avoid? <span className="text-xs text-gray-500 font-normal">(optional)</span>
+                What to avoid? <span className="text-xs font-normal text-gray-500">(optional)</span>
               </h3>
               <div className="flex flex-wrap gap-2">
                 {RISK_OPTIONS.map((risk) => {
@@ -595,9 +690,9 @@ export default function Planner() {
 
             {/* Duration */}
             <GlassCard className="p-5">
-              <h3 className="text-sm font-semibold text-gray-300 mb-4 flex items-center gap-2">
+              <h3 className="flex items-center gap-2 mb-4 text-sm font-semibold text-gray-300">
                 <Clock className="w-4 h-4 text-indigo-400" />
-                Duration <span className="text-xs text-gray-500 font-normal">(optional)</span>
+                Duration <span className="text-xs font-normal text-gray-500">(optional)</span>
               </h3>
               <div className="flex flex-wrap gap-2">
                 {DURATION_OPTIONS.map((opt) => (
@@ -618,16 +713,16 @@ export default function Planner() {
 
             {/* Notes */}
             <GlassCard className="p-5">
-              <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+              <h3 className="flex items-center gap-2 mb-3 text-sm font-semibold text-gray-300">
                 <MoreHorizontal className="w-4 h-4 text-indigo-400" />
-                Additional Notes <span className="text-xs text-gray-500 font-normal">(optional)</span>
+                Additional Notes <span className="text-xs font-normal text-gray-500">(optional)</span>
               </h3>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="E.g., Carrying equipment, elderly passengers, kids..."
                 rows={2}
-                className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm resize-none"
+                className="w-full px-4 py-3 text-sm text-white placeholder-gray-500 border border-gray-700 resize-none bg-gray-800/50 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </GlassCard>
 
@@ -635,7 +730,7 @@ export default function Planner() {
             <button
               onClick={generatePlan}
               disabled={!activity || loading || (activity === 'other' && !customActivity)}
-              className="w-full py-4 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl font-semibold hover:from-indigo-600 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="flex items-center justify-center w-full gap-2 py-4 font-semibold text-white transition-all bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl hover:from-indigo-600 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <>
@@ -697,7 +792,7 @@ export default function Planner() {
                           {result.riskLevel} Risk
                         </span>
                       </div>
-                      <p className="text-white font-medium leading-relaxed">
+                      <p className="font-medium leading-relaxed text-white">
                         {result.recommendation}
                       </p>
                     </div>
@@ -705,12 +800,12 @@ export default function Planner() {
                 </GlassCard>
 
                 {/* Time Recommendations */}
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {result.bestTime && (
                     <GlassCard className="p-4 border-green-500/20 bg-green-500/5">
                       <div className="flex items-center gap-2 mb-2">
                         <CheckCircle className="w-4 h-4 text-green-400" />
-                        <span className="text-xs text-green-400 font-semibold">Best Time</span>
+                        <span className="text-xs font-semibold text-green-400">Best Time</span>
                       </div>
                       <p className="text-xl font-bold text-white">{result.bestTime}</p>
                     </GlassCard>
@@ -720,7 +815,7 @@ export default function Planner() {
                     <GlassCard className="p-4 border-red-500/20 bg-red-500/5">
                       <div className="flex items-center gap-2 mb-2">
                         <AlertTriangle className="w-4 h-4 text-red-400" />
-                        <span className="text-xs text-red-400 font-semibold">Avoid</span>
+                        <span className="text-xs font-semibold text-red-400">Avoid</span>
                       </div>
                       <p className="text-xl font-bold text-white">{result.avoidTime}</p>
                     </GlassCard>
@@ -730,7 +825,7 @@ export default function Planner() {
                 {/* Tips */}
                 {result.tips && result.tips.length > 0 && (
                   <GlassCard className="p-5">
-                    <h3 className="text-sm font-semibold text-indigo-300 mb-4 flex items-center gap-2">
+                    <h3 className="flex items-center gap-2 mb-4 text-sm font-semibold text-indigo-300">
                       <Sparkles className="w-4 h-4" />
                       Smart Tips
                     </h3>
@@ -750,11 +845,11 @@ export default function Planner() {
                 {/* Current Weather Summary */}
                 {weatherData && (
                   <GlassCard className="p-5">
-                    <h3 className="text-sm font-semibold text-gray-400 mb-3 flex items-center gap-2">
+                    <h3 className="flex items-center gap-2 mb-3 text-sm font-semibold text-gray-400">
                       <Sun className="w-4 h-4" />
                       Current Conditions
                     </h3>
-                    <div className="grid grid-cols-4 gap-3 text-center">
+                    <div className="grid grid-cols-2 gap-4 text-center sm:grid-cols-4">
                       <div>
                         <p className="text-xl font-bold text-white">{weatherData.current?.temp}°</p>
                         <p className="text-[10px] text-gray-500">Temp</p>
@@ -778,7 +873,7 @@ export default function Planner() {
                 {/* Plan Again Button */}
                 <button
                   onClick={resetPlan}
-                  className="w-full py-3 bg-gray-800 text-white rounded-xl font-medium hover:bg-gray-700 transition-all flex items-center justify-center gap-2 border border-gray-700"
+                  className="flex items-center justify-center w-full gap-2 py-3 font-medium text-white transition-all bg-gray-800 border border-gray-700 rounded-xl hover:bg-gray-700"
                 >
                   <RefreshCw className="w-4 h-4" />
                   Plan Another Activity

@@ -33,13 +33,13 @@ export default function Navbar() {
   };
 
   return (
-    <nav className="sticky top-0 z-50 bg-black/80 backdrop-blur-xl border-b border-white/[0.05]">
+    <nav className="sticky top-0 z-50 border-b border-indigo-400/15 bg-slate-950/75 backdrop-blur-xl">
       <div className="px-4 mx-auto max-w-7xl sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <NavLink to="/" className="flex items-center gap-2 group">
             <span className="text-2xl">⛅</span>
-            <span className="text-lg font-bold text-transparent bg-gradient-to-r from-indigo-300 to-purple-300 bg-clip-text">
+            <span className="bg-linear-to-r from-indigo-300 to-purple-300 bg-clip-text text-lg font-bold text-transparent">
               Mausam Vaani
             </span>
           </NavLink>
@@ -49,9 +49,9 @@ export default function Navbar() {
             {[
               { to: "/", label: "Home", icon: <WiDaySunny size={20} /> },
               { to: "/forecast", label: "Forecast", icon: <WiRaindrops size={20} /> },
-              { to: "/map", label: "Map", icon: <HiOutlineMapPin size={18} /> },
               { to: "/alerts", label: "Alerts", icon: <HiOutlineBell size={18} /> },
-              { to: "/planner", label: "Planner", icon: <HiOutlineSparkles size={18} /> },
+              { to: "/insights", label: "Insights", icon: <HiOutlineSparkles size={18} /> },
+              { to: "/map", label: "Map", icon: <HiOutlineMapPin size={18} /> },
             ].map((link) => (
               <NavLink
                 key={link.to}
@@ -59,8 +59,8 @@ export default function Navbar() {
                 className={({ isActive }) =>
                   `flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
                     isActive
-                      ? "bg-white/[0.12] text-white"
-                      : "text-gray-400 hover:text-white hover:bg-white/[0.06]"
+                      ? "bg-indigo-400/15 text-white"
+                      : "text-gray-400 hover:bg-indigo-400/10 hover:text-white"
                   }`
                 }
               >
@@ -79,7 +79,7 @@ export default function Navbar() {
                 {location && (
                   <div className="flex items-center gap-1.5 text-sm text-gray-300 px-2 py-1">
                     <HiOutlineMapPin className="text-blue-400" size={14} />
-                    <span className="max-w-[100px] truncate text-xs">{location.city}</span>
+                    <span className="max-w-25 truncate text-xs">{location.city}</span>
                   </div>
                 )}
                 <button
@@ -95,7 +95,7 @@ export default function Navbar() {
               {/* Mobile: Single location button */}
               <button
                 onClick={handleLocationClick}
-                className="p-2 text-blue-300 transition-colors border rounded-lg sm:hidden bg-blue-500/20 hover:bg-blue-500/30 border-blue-500/30"
+                className="p-2 text-blue-300 transition-colors border rounded-lg sm:hidden bg-indigo-500/20 hover:bg-indigo-500/30 border-indigo-500/30"
                 title={location ? `Current: ${location.city} - Tap to change` : "Set your location"}
               >
                 <HiOutlineMapPin size={18} />
@@ -109,7 +109,7 @@ export default function Navbar() {
             {isLoggedIn ? (
               <NavLink
                 to="/profile"
-                className="p-2 rounded-xl hover:bg-white/[0.08] transition-colors text-gray-300 hover:text-white"
+                className="rounded-xl p-2 text-gray-300 transition-colors hover:bg-indigo-400/10 hover:text-white"
               >
                 <HiOutlineUser size={20} />
               </NavLink>

@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import GlassCard from "./GlassCard";
-import { getOWMIconUrl } from "../utils/helpers";
+import { formatTemperatureC, formatWindKmh, getOWMIconUrl } from "../utils/helpers";
 
 /**
  * Main current-weather hero card.
@@ -8,34 +8,42 @@ import { getOWMIconUrl } from "../utils/helpers";
 export default function WeatherCard({ data, city }) {
   if (!data) return null;
 
-  const { temp, feelsLike, condition, description, icon, humidity, wind } = data;
+  const { temp, feelsLike, condition, description, icon, humidity, wind, aqi } = data;
+  const aqiLabel = {
+    1: "Good",
+    2: "Fair",
+    3: "Moderate",
+    4: "Poor",
+    5: "Very Poor",
+    6: "Hazardous",
+  };
 
   return (
-    <GlassCard className="p-6 sm:p-8 relative overflow-hidden">
+    <GlassCard className="relative p-6 overflow-hidden sm:p-8">
       {/* Background glow */}
-      <div className="absolute -top-20 -right-20 w-60 h-60 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-20 -left-20 w-48 h-48 bg-purple-500/15 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute rounded-full pointer-events-none -top-20 -right-20 w-60 h-60 bg-indigo-500/20 blur-3xl" />
+      <div className="absolute w-48 h-48 rounded-full pointer-events-none -bottom-20 -left-20 bg-purple-500/15 blur-3xl" />
 
       <div className="relative z-10">
         {/* City */}
-        <p className="text-gray-400 text-sm font-medium tracking-wide uppercase mb-1">
+        <p className="mb-1 text-sm font-medium tracking-wide text-gray-400 uppercase">
           {city || "Loading..."}
         </p>
-        <p className="text-gray-500 text-xs mb-4 capitalize">{description}</p>
+        <p className="mb-4 text-xs text-gray-500 capitalize">{description}</p>
 
         <div className="flex items-center justify-between">
           {/* Temperature */}
           <div>
             <motion.h1
-              className="text-7xl sm:text-8xl font-extralight text-white tracking-tighter"
+              className="tracking-tighter text-white text-7xl sm:text-8xl font-extralight"
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.6, ease: "easeOut" }}
             >
-              {temp}°
+              {formatTemperatureC(temp)}
             </motion.h1>
-            <p className="text-gray-400 text-sm mt-2">
-              Feels like {feelsLike}° · {condition}
+            <p className="mt-2 text-sm text-gray-400">
+              Feels like {formatTemperatureC(feelsLike)} · {condition}
             </p>
           </div>
 
@@ -53,7 +61,11 @@ export default function WeatherCard({ data, city }) {
         {/* Quick stats */}
         <div className="flex gap-6 mt-6 text-sm text-gray-400">
           <span>💧 {humidity}%</span>
-          <span>💨 {wind} km/h</span>
+          <span>💨 {formatWindKmh(wind)}</span>
+          <span className="inline-flex items-center gap-1 text-emerald-300">
+            <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.75)]"></span>
+            AQI {aqi ?? "--"}{aqi ? ` (${aqiLabel[aqi] || "Unknown"})` : ""}
+          </span>
         </div>
       </div>
     </GlassCard>

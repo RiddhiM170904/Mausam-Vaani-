@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { MapPin, Navigation, Sparkles, ArrowRight } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
@@ -16,6 +16,26 @@ import WeatherDetails from "../components/WeatherDetails";
 import LocationSelector from "../components/LocationSelector";
 import Loader from "../components/Loader";
 import GlassCard from "../components/GlassCard";
+import ServiceUnavailable from "../components/ServiceUnavailable";
+
+const getSafeInsightMessage = (insight) => {
+  if (!insight) return "";
+  if (typeof insight === "string") return insight;
+
+  if (typeof insight?.message === "string" && insight.message.trim()) {
+    return insight.message;
+  }
+
+  if (typeof insight?.recommendation === "string" && insight.recommendation.trim()) {
+    return insight.recommendation;
+  }
+
+  if (Array.isArray(insight?.tips) && insight.tips.length > 0) {
+    return String(insight.tips[0]);
+  }
+
+  return "Weather insight is being updated. Please check again shortly.";
+};
 
 export default function Home() {
   const navigate = useNavigate();
@@ -25,33 +45,54 @@ export default function Home() {
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [showLocationSelector, setShowLocationSelector] = useState(false);
+  const insightInFlightRef = useRef(false);
+  const lastInsightKeyRef = useRef("");
+  const insightMessage = getSafeInsightMessage(insight);
 
   // Fetch AI quick insight
   useEffect(() => {
-    if (data) {
-      setInsightLoading(true);
-      const insightData = {
-        persona: user?.persona || 'general',
-        weatherRisks: user?.weatherRisks || [],
-        weatherData: data,
-        location: location
-      };
-      
-      insightService
-        .getQuickInsight(insightData)
-        .then((res) => {
-          setInsight(res);
-          setInsightLoading(false);
-        })
-        .catch(() => {
-          setInsightLoading(false);
-        });
+    if (!data) return;
+
+    const requestKey = [
+      location?.lat,
+      location?.lon,
+      user?.persona || "general",
+      data?.current?.temp,
+      data?.current?.condition,
+    ].join("|");
+
+    if (insightInFlightRef.current || lastInsightKeyRef.current === requestKey) {
+      return;
     }
+
+    insightInFlightRef.current = true;
+    lastInsightKeyRef.current = requestKey;
+    setInsightLoading(true);
+
+    const insightData = {
+      persona: user?.persona || "general",
+      weatherRisks: user?.weather_risks || user?.weatherRisks || [],
+      weatherData: data,
+      location,
+    };
+
+    insightService
+      .getQuickInsight(insightData)
+      .then((res) => {
+        setInsight(res);
+      })
+      .catch(() => {
+        // Keep silent fallback behavior for unavailable AI backend.
+      })
+      .finally(() => {
+        insightInFlightRef.current = false;
+        setInsightLoading(false);
+      });
   }, [data, user, location]);
 
   useEffect(() => {
     if (isLoggedIn && user && user.planner_profile_completed === false) {
-      navigate("/planner");
+      navigate("/insights");
     }
   }, [isLoggedIn, user, navigate]);
 
@@ -65,16 +106,12 @@ export default function Home() {
 
   if (error && !data) {
     return (
-      <div className="py-20 text-center">
-        <p className="text-lg text-red-400">⚠️ {error}</p>
-        <p className="mt-2 text-sm text-gray-500">Please check your internet connection</p>
-        <button 
-          onClick={refreshLocation}
-          className="px-4 py-2 mt-4 text-white transition-colors bg-blue-500 rounded-lg hover:bg-blue-600"
-        >
-          Retry
-        </button>
-      </div>
+      <ServiceUnavailable
+        title="Weather Service Unavailable"
+        message="We are not servicing at this time. Sorry for the inconvenience."
+        showRetry
+        onRetry={refreshLocation}
+      />
     );
   }
 
@@ -93,7 +130,7 @@ export default function Home() {
       variants={stagger}
       initial="hidden"
       animate="show"
-      className="space-y-4 sm:space-y-6"
+      className="p-3 space-y-4 border rounded-3xl border-indigo-400/10 bg-slate-950/30 sm:space-y-6 sm:p-4"
     >
       {/* Greeting & Location */}
       <motion.div variants={fadeUp}>
@@ -105,7 +142,7 @@ export default function Home() {
             ? `Welcome back, ${user?.name || "User"}`
             : "Here's your live weather update"}
         </p>
-        
+
         {/* Current Location Display */}
         {location && (
           <div className="flex items-center gap-2 mt-3">
@@ -152,7 +189,7 @@ export default function Home() {
       {/* AI Quick Insight Card */}
       {(insight || insightLoading) && (
         <motion.div variants={fadeUp}>
-          <GlassCard className="p-4 border-indigo-500/20 bg-linear-to-r from-indigo-500/8 to-purple-500/8 m-5">
+          <GlassCard className="p-4 border-indigo-500/20 bg-linear-to-r from-indigo-500/8 to-purple-500/8">
             {insightLoading ? (
               <div className="flex items-center gap-3">
                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-indigo-500/20">
@@ -165,7 +202,7 @@ export default function Home() {
               </div>
             ) : insight && (
               <div className="flex items-start gap-3">
-                <div className="flex items-center justify-center shrink-0 w-10 h-10 rounded-xl bg-linear-to-br from-indigo-500 to-purple-600">
+                <div className="flex items-center justify-center w-10 h-10 shrink-0 rounded-xl bg-linear-to-br from-indigo-500 to-purple-600">
                   <Sparkles className="w-5 h-5 text-white" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -173,14 +210,14 @@ export default function Home() {
                     {insight.title || 'AI Insight'}
                   </p>
                   <p className="text-sm leading-relaxed text-gray-200">
-                    {insight.message || insight}
+                    {insightMessage}
                   </p>
                   {isLoggedIn && (
-                    <Link 
-                      to="/planner"
+                    <Link
+                      to="/insights"
                       className="inline-flex items-center gap-1 mt-2 text-xs font-medium text-indigo-400 transition-colors hover:text-indigo-300"
                     >
-                      Plan your day with AI
+                      Explore AI insights
                       <ArrowRight className="w-3 h-3" />
                     </Link>
                   )}
@@ -190,6 +227,8 @@ export default function Home() {
           </GlassCard>
         </motion.div>
       )}
+
+
 
       {/* Main weather card */}
       <motion.div variants={fadeUp}>
@@ -210,9 +249,9 @@ export default function Home() {
       <motion.div variants={fadeUp}>
         <ForecastCard days={data?.daily} />
       </motion.div>
-      
+
       {/* Location Selector Modal */}
-      <LocationSelector 
+      <LocationSelector
         isOpen={showLocationSelector}
         onClose={() => setShowLocationSelector(false)}
         onLocationSelect={handleLocationSelect}

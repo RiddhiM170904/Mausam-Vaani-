@@ -69,7 +69,7 @@ export default function Profile() {
       </GlassCard>
 
       {/* Settings */}
-      <div className="space-y-2">
+      <div className="space-y-2 px-1 sm:px-0">
         <h3 className="text-sm font-semibold text-gray-400 px-1">Settings</h3>
 
         {/* Theme */}

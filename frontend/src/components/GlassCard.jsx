@@ -16,15 +16,17 @@ export default function GlassCard({
 
   const animateProps = animate
     ? {
-        initial: { opacity: 0, y: 20 },
-        animate: { opacity: 1, y: 0 },
-        transition: { duration: 0.4, ease: "easeOut" },
-      }
+      initial: { opacity: 0, y: 20 },
+      animate: { opacity: 1, y: 0 },
+      transition: { duration: 0.4, ease: "easeOut" },
+    }
     : {};
 
   return (
     <Component
       className={`
+        w-full
+        min-w-0
         rounded-3xl
         bg-white/[0.04]
         backdrop-blur-xl
