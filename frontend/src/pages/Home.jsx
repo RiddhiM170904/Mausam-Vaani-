@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { MapPin, Navigation, Sparkles, ArrowRight } from "lucide-react";
+import { MapPin, Sparkles, ArrowRight } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import useLocation from "../hooks/useLocation";
 import useWeather from "../hooks/useWeather";
@@ -39,7 +39,7 @@ const getSafeInsightMessage = (insight) => {
 
 export default function Home() {
   const navigate = useNavigate();
-  const { location, currentLocation, savedLocation, loading: locationLoading, error: locationError, refreshLocation } = useLocation();
+  const { location, currentLocation, savedLocation, locationSource, loading: locationLoading, error: locationError, refreshLocation } = useLocation();
   const { data, loading, error } = useWeather(location?.lat, location?.lon);
   const { isLoggedIn, user } = useAuth();
   const [insight, setInsight] = useState(null);
@@ -48,6 +48,8 @@ export default function Home() {
   const insightInFlightRef = useRef(false);
   const lastInsightKeyRef = useRef("");
   const insightMessage = getSafeInsightMessage(insight);
+  const displayLocationName =
+    location?.city && location.city !== "Unknown" ? location.city : (data?.city || "Unknown");
 
   // Fetch AI quick insight
   useEffect(() => {
@@ -74,6 +76,9 @@ export default function Home() {
       weatherRisks: user?.weather_risks || user?.weatherRisks || [],
       weatherData: data,
       location,
+      latitude: location?.lat,
+      longitude: location?.lon,
+      location_name: location?.city,
     };
 
     insightService
@@ -145,23 +150,19 @@ export default function Home() {
 
         {/* Current Location Display */}
         {location && (
-          <div className="flex items-center gap-2 mt-3">
+          <div className="mt-3">
             <div className="flex items-center gap-2">
-              {savedLocation ? (
-                <MapPin className="w-4 h-4 text-blue-400" />
-              ) : (
-                <Navigation className="w-4 h-4 text-green-400" />
-              )}
+              <MapPin className="w-4 h-4 text-blue-400" />
               <span className="text-sm text-gray-300">
                 {location.city}
-                {savedLocation && isLoggedIn && (
+                {locationSource === "saved" && savedLocation && isLoggedIn && (
                   <span className="ml-1 text-blue-400">(Saved)</span>
-                )}
-                {!savedLocation && (
-                  <span className="ml-1 text-green-400">(Current)</span>
                 )}
               </span>
             </div>
+            {location.formattedAddress && (
+              <p className="mt-1 text-xs text-gray-500">{location.formattedAddress}</p>
+            )}
             <button
               onClick={() => setShowLocationSelector(true)}
               className="text-xs text-blue-400 underline transition-colors hover:text-blue-300"
@@ -232,7 +233,7 @@ export default function Home() {
 
       {/* Main weather card */}
       <motion.div variants={fadeUp}>
-        <WeatherCard data={data?.current} city={data?.city} />
+        <WeatherCard data={data?.current} city={displayLocationName} />
       </motion.div>
 
       {/* Hourly */}

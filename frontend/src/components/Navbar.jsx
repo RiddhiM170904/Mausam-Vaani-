@@ -6,7 +6,6 @@ import {
 } from "react-icons/wi";
 import {
   HiOutlineMapPin,
-  HiOutlineBell,
   HiOutlineUser,
   HiOutlineSparkles,
 } from "react-icons/hi2";
@@ -27,7 +26,6 @@ export default function Navbar() {
   };
 
   const handleLocationSelect = (locationData) => {
-    console.log('Location selected in navbar:', locationData);
     refreshLocation();
     setShowLocationSelector(false);
   };
@@ -39,7 +37,7 @@ export default function Navbar() {
           {/* Logo */}
           <NavLink to="/" className="flex items-center gap-2 group">
             <span className="text-2xl">⛅</span>
-            <span className="bg-linear-to-r from-indigo-300 to-purple-300 bg-clip-text text-lg font-bold text-transparent">
+            <span className="text-lg font-bold text-transparent bg-linear-to-r from-indigo-300 to-purple-300 bg-clip-text">
               Mausam Vaani
             </span>
           </NavLink>
@@ -49,7 +47,6 @@ export default function Navbar() {
             {[
               { to: "/", label: "Home", icon: <WiDaySunny size={20} /> },
               { to: "/forecast", label: "Forecast", icon: <WiRaindrops size={20} /> },
-              { to: "/alerts", label: "Alerts", icon: <HiOutlineBell size={18} /> },
               { to: "/insights", label: "Insights", icon: <HiOutlineSparkles size={18} /> },
               { to: "/map", label: "Map", icon: <HiOutlineMapPin size={18} /> },
             ].map((link) => (
@@ -79,7 +76,7 @@ export default function Navbar() {
                 {location && (
                   <div className="flex items-center gap-1.5 text-sm text-gray-300 px-2 py-1">
                     <HiOutlineMapPin className="text-blue-400" size={14} />
-                    <span className="max-w-25 truncate text-xs">{location.city}</span>
+                    <span className="text-xs truncate max-w-25">{location.city}</span>
                   </div>
                 )}
                 <button
@@ -109,7 +106,7 @@ export default function Navbar() {
             {isLoggedIn ? (
               <NavLink
                 to="/profile"
-                className="rounded-xl p-2 text-gray-300 transition-colors hover:bg-indigo-400/10 hover:text-white"
+                className="p-2 text-gray-300 transition-colors rounded-xl hover:bg-indigo-400/10 hover:text-white"
               >
                 <HiOutlineUser size={20} />
               </NavLink>

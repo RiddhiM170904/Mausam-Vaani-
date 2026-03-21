@@ -45,6 +45,7 @@ npm run build
 
 ```env
 VITE_OWM_KEY=          # OpenWeatherMap API key (free at openweathermap.org)
+VITE_GOOGLE_PLACES_API_KEY=   # Google Places API key for hyperlocal place name (100m)
 VITE_API_URL=          # Backend API URL (default: http://localhost:5000/api)
 ```
 

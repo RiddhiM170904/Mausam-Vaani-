@@ -17,6 +17,9 @@ export const insightService = {
    */
   async getQuickInsight(data) {
     const { weatherData, persona = 'general', location = null, weatherRisks = [] } = data || {};
+    const lat = data?.latitude ?? location?.lat ?? null;
+    const lon = data?.longitude ?? location?.lon ?? null;
+    const locationName = data?.location_name || location?.city || location?.formattedAddress || 'Unknown';
     
     try {
       // Call FastAPI AI-Backend
@@ -29,6 +32,9 @@ export const insightService = {
           weatherData,
           persona,
           location,
+          latitude: lat,
+          longitude: lon,
+          location_name: locationName,
           weatherRisks,
           timestamp: new Date().toISOString()
         })

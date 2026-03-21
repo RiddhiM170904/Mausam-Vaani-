@@ -3,11 +3,17 @@ const WEATHER_API_BASE = "https://api.weatherapi.com/v1";
 const OWM_KEY = import.meta.env.VITE_OWM_KEY || "";
 const OWM_BASE = "https://api.openweathermap.org/data/2.5";
 const OWM_GEO = "https://api.openweathermap.org/geo/1.0";
+const GOOGLE_PLACES_API_KEY = import.meta.env.VITE_GOOGLE_PLACES_API_KEY || "";
 const WEATHER_PROVIDER = (import.meta.env.VITE_WEATHER_PROVIDER || "auto").toLowerCase();
 const WEATHER_DEBUG_PREFIX = "[WeatherDebug]";
 const WEATHER_CACHE_TTL_MS = 5 * 60 * 1000;
 const weatherResponseCache = new Map();
 const weatherInFlightRequests = new Map();
+const PLACES_CACHE_TTL_MS = 60 * 1000;
+const placesResponseCache = new Map();
+const placesInFlightRequests = new Map();
+const OSM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse";
+let hasLoggedPlaces403 = false;
 
 const getCoordCacheKey = (lat, lon) => `${Number(lat).toFixed(4)},${Number(lon).toFixed(4)}`;
 
@@ -15,6 +21,55 @@ const getCoordCacheKey = (lat, lon) => `${Number(lat).toFixed(4)},${Number(lon).
   * Weather service — calls OpenWeatherMap directly.
  */
 export const weatherService = {
+  async getOpenStreetHyperlocalPlace(lat, lon) {
+    try {
+      const response = await fetch(
+        `${OSM_REVERSE_URL}?format=jsonv2&lat=${Number(lat)}&lon=${Number(lon)}&zoom=18&addressdetails=1&namedetails=1`,
+        {
+          headers: {
+            "Accept-Language": "en",
+          },
+        }
+      );
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const payload = await response.json();
+      const address = payload?.address || {};
+
+      const name =
+        payload?.name ||
+        payload?.namedetails?.name ||
+        address?.amenity ||
+        address?.building ||
+        address?.tourism ||
+        address?.leisure ||
+        address?.attraction ||
+        address?.road ||
+        address?.neighbourhood ||
+        address?.suburb ||
+        null;
+
+      if (!name) {
+        return null;
+      }
+
+      return {
+        placeId: payload?.place_id ? String(payload.place_id) : null,
+        name,
+        formattedAddress: payload?.display_name || name,
+        coordinates: {
+          lat: Number(payload?.lat ?? lat),
+          lon: Number(payload?.lon ?? lon),
+        },
+      };
+    } catch {
+      return null;
+    }
+  },
+
   async getFullWeatherCached(lat, lon, { force = false } = {}) {
     const key = getCoordCacheKey(lat, lon);
     const now = Date.now();
@@ -197,6 +252,109 @@ export const weatherService = {
     }
 
     return "Unknown";
+  },
+
+  /**
+   * Hyperlocal place lookup using Google Places API.
+   * Returns nearest place/address within the provided radius (default: 100m).
+   */
+  async getNearbyPlaceName(lat, lon, options = {}) {
+    const radius = Math.min(Math.max(Number(options?.radius) || 100, 1), 50000);
+    const key = `${Number(lat).toFixed(5)},${Number(lon).toFixed(5)},${radius}`;
+    const cached = placesResponseCache.get(key);
+    const now = Date.now();
+
+    if (cached && now - cached.timestamp < PLACES_CACHE_TTL_MS) {
+      return cached.data;
+    }
+
+    const existing = placesInFlightRequests.get(key);
+    if (existing) {
+      return existing;
+    }
+
+    if (!GOOGLE_PLACES_API_KEY) {
+      const osmFallback = await this.getOpenStreetHyperlocalPlace(lat, lon);
+      placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
+      return osmFallback;
+    }
+
+    const requestPromise = (async () => {
+      const response = await fetch("https://places.googleapis.com/v1/places:searchNearby", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location",
+        },
+        body: JSON.stringify({
+          maxResultCount: 1,
+          rankPreference: "DISTANCE",
+          locationRestriction: {
+            circle: {
+              center: {
+                latitude: Number(lat),
+                longitude: Number(lon),
+              },
+              radius,
+            },
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => "");
+        if (response.status === 403 && !hasLoggedPlaces403) {
+          hasLoggedPlaces403 = true;
+          console.warn(`${WEATHER_DEBUG_PREFIX} Places lookup failed (403). Enable Places API (New), attach billing, and allow localhost referrer for this key.`);
+        } else if (response.status !== 403) {
+          console.warn(`${WEATHER_DEBUG_PREFIX} Places lookup failed`, {
+            status: response.status,
+            body: errorBody?.slice?.(0, 150),
+          });
+        }
+        const osmFallback = await this.getOpenStreetHyperlocalPlace(lat, lon);
+        placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
+        return osmFallback;
+      }
+
+      const payload = await response.json();
+      const place = payload?.places?.[0];
+
+      if (!place) {
+        const osmFallback = await this.getOpenStreetHyperlocalPlace(lat, lon);
+        placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
+        return osmFallback;
+      }
+
+      const name = place?.displayName?.text || place?.formattedAddress || null;
+      if (!name) {
+        const osmFallback = await this.getOpenStreetHyperlocalPlace(lat, lon);
+        placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
+        return osmFallback;
+      }
+
+      const result = {
+        placeId: place.id || null,
+        name,
+        formattedAddress: place.formattedAddress || name,
+        coordinates: {
+          lat: place?.location?.latitude ?? Number(lat),
+          lon: place?.location?.longitude ?? Number(lon),
+        },
+      };
+
+      placesResponseCache.set(key, { timestamp: Date.now(), data: result });
+      return result;
+    })().catch(async (err) => {
+      console.warn(`${WEATHER_DEBUG_PREFIX} Places lookup error`, err?.message || err);
+      return this.getOpenStreetHyperlocalPlace(lat, lon);
+    }).finally(() => {
+      placesInFlightRequests.delete(key);
+    });
+
+    placesInFlightRequests.set(key, requestPromise);
+    return requestPromise;
   },
 
   /**
