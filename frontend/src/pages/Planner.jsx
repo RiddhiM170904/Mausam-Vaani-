@@ -434,7 +434,7 @@ export default function Planner() {
                       {question.required ? (
                         <span className="text-red-400"> *</span>
                       ) : (
-                        <span className="text-gray-500"> (optional)</span>
+                        <span className="text-gray-500"> </span>
                       )}
                     </label>
 

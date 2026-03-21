@@ -12,6 +12,7 @@ import {
 const links = [
   { to: "/", icon: HiOutlineHome, label: "Home" },
   { to: "/forecast", icon: HiOutlineCalendarDays, label: "Forecast" },
+  { to: "/planner", icon: HiOutlineCalendarDays, label: "Planner" },
   { to: "/insights", icon: HiOutlineSparkles, label: "Insights" },
   { to: "/map", icon: HiOutlineMap, label: "Map" },
   { to: "/profile", icon: HiOutlineUser, label: "Profile" },

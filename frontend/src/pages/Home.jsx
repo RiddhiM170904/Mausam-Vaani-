@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { MapPin, Sparkles, ArrowRight } from "lucide-react";
+import { MapPin, Sparkles, ArrowRight, UserPlus, LogIn, X } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import useLocation from "../hooks/useLocation";
 import useWeather from "../hooks/useWeather";
@@ -17,6 +17,8 @@ import LocationSelector from "../components/LocationSelector";
 import Loader from "../components/Loader";
 import GlassCard from "../components/GlassCard";
 import ServiceUnavailable from "../components/ServiceUnavailable";
+
+const GUEST_ONBOARDING_KEY = "mv_guest_onboarding_seen";
 
 const getSafeInsightMessage = (insight) => {
   if (!insight) return "";
@@ -45,6 +47,7 @@ export default function Home() {
   const [insight, setInsight] = useState(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [showLocationSelector, setShowLocationSelector] = useState(false);
+  const [showGuestOnboarding, setShowGuestOnboarding] = useState(false);
   const insightInFlightRef = useRef(false);
   const lastInsightKeyRef = useRef("");
   const insightMessage = getSafeInsightMessage(insight);
@@ -100,6 +103,23 @@ export default function Home() {
       navigate("/insights");
     }
   }, [isLoggedIn, user, navigate]);
+
+  // One-time guest onboarding CTA after first location resolution.
+  useEffect(() => {
+    if (locationLoading || isLoggedIn || !location) {
+      return;
+    }
+
+    const hasSeenOnboarding = localStorage.getItem(GUEST_ONBOARDING_KEY) === "1";
+    if (!hasSeenOnboarding) {
+      setShowGuestOnboarding(true);
+    }
+  }, [locationLoading, isLoggedIn, location]);
+
+  const dismissGuestOnboarding = () => {
+    localStorage.setItem(GUEST_ONBOARDING_KEY, "1");
+    setShowGuestOnboarding(false);
+  };
 
   // Handle location selection
   const handleLocationSelect = (newLocation) => {
@@ -184,6 +204,61 @@ export default function Home() {
       {data?.alerts?.length > 0 && (
         <motion.div variants={fadeUp}>
           <AlertBanner alerts={data.alerts} />
+        </motion.div>
+      )}
+
+      {/* First-time guest onboarding popup */}
+      {!isLoggedIn && showGuestOnboarding && (
+        <motion.div
+          variants={fadeUp}
+          className="relative"
+        >
+          <GlassCard className="border-cyan-500/25 bg-linear-to-br from-cyan-500/10 to-indigo-500/10 p-4 sm:p-5">
+            <button
+              onClick={dismissGuestOnboarding}
+              className="absolute right-3 top-3 rounded-lg p-1 text-gray-400 transition-colors hover:bg-white/10 hover:text-white"
+              aria-label="Dismiss guest onboarding"
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">Welcome to Mausam Vaani</p>
+            <h3 className="mt-1 text-base font-semibold text-white sm:text-lg">
+              Get AI curated weather insights for your exact location
+            </h3>
+            <p className="mt-1 text-sm text-gray-300">
+              Sign up to unlock personalized alerts, planner recommendations, and risk-aware daily guidance.
+            </p>
+
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => {
+                  dismissGuestOnboarding();
+                  navigate("/signup");
+                }}
+                className="inline-flex items-center gap-2 rounded-xl border border-cyan-400/40 bg-cyan-500/20 px-3 py-2 text-sm font-medium text-cyan-200 transition-colors hover:bg-cyan-500/30"
+              >
+                <UserPlus className="h-4 w-4" />
+                Sign up
+              </button>
+              <button
+                onClick={() => {
+                  dismissGuestOnboarding();
+                  navigate("/login");
+                }}
+                className="inline-flex items-center gap-2 rounded-xl border border-indigo-400/35 bg-indigo-500/15 px-3 py-2 text-sm font-medium text-indigo-200 transition-colors hover:bg-indigo-500/25"
+              >
+                <LogIn className="h-4 w-4" />
+                Sign in
+              </button>
+              <button
+                onClick={dismissGuestOnboarding}
+                className="text-xs text-gray-400 underline underline-offset-2 hover:text-gray-200"
+              >
+                Continue as guest
+              </button>
+            </div>
+          </GlassCard>
         </motion.div>
       )}
 

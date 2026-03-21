@@ -5,6 +5,7 @@ import {
   WiRaindrops,
 } from "react-icons/wi";
 import {
+  HiOutlineCalendarDays,
   HiOutlineMapPin,
   HiOutlineUser,
   HiOutlineSparkles,
@@ -47,6 +48,7 @@ export default function Navbar() {
             {[
               { to: "/", label: "Home", icon: <WiDaySunny size={20} /> },
               { to: "/forecast", label: "Forecast", icon: <WiRaindrops size={20} /> },
+              { to: "/planner", label: "Planner", icon: <HiOutlineCalendarDays size={18} /> },
               { to: "/insights", label: "Insights", icon: <HiOutlineSparkles size={18} /> },
               { to: "/map", label: "Map", icon: <HiOutlineMapPin size={18} /> },
             ].map((link) => (

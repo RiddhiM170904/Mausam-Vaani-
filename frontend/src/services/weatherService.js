@@ -3,6 +3,7 @@ const WEATHER_API_BASE = "https://api.weatherapi.com/v1";
 const OWM_KEY = import.meta.env.VITE_OWM_KEY || "";
 const OWM_BASE = "https://api.openweathermap.org/data/2.5";
 const OWM_GEO = "https://api.openweathermap.org/geo/1.0";
+const OWM_ONECALL = "https://api.openweathermap.org/data/3.0/onecall";
 const GOOGLE_PLACES_API_KEY = import.meta.env.VITE_GOOGLE_PLACES_API_KEY || "";
 const WEATHER_PROVIDER = (import.meta.env.VITE_WEATHER_PROVIDER || "auto").toLowerCase();
 const WEATHER_DEBUG_PREFIX = "[WeatherDebug]";
@@ -152,7 +153,21 @@ export const weatherService = {
       if (!OWM_KEY) {
         throw new Error("VITE_WEATHER_PROVIDER is owm, but VITE_OWM_KEY is missing.");
       }
-      return this.getRealtimeWeatherFromOWM(lat, lon);
+
+      try {
+        return await this.getRealtimeWeatherFromOWM(lat, lon);
+      } catch (err) {
+        const canFallbackToWeatherApi =
+          WEATHER_API_KEY &&
+          /status\s*(401|403|429|500|502|503|504)/i.test(err?.message || "");
+
+        if (canFallbackToWeatherApi) {
+          console.warn(`${WEATHER_DEBUG_PREFIX} OWM failed, falling back to WeatherAPI`);
+          return this.getRealtimeWeather(lat, lon);
+        }
+
+        throw err;
+      }
     }
 
     throw new Error("Missing weather API key. Set VITE_OWM_KEY (or VITE_WEATHERAPI_KEY).");
@@ -202,7 +217,78 @@ export const weatherService = {
     }
 
     const payload = await response.json();
-    return this.transformOWMForecastData(payload);
+
+    // Optional enrichment calls. These should not block the core weather response.
+    const [airForecastResult, airCurrentResult, alertsResult] = await Promise.allSettled([
+      this.getOWMAirPollutionForecast(lat, lon),
+      this.getOWMAirPollutionCurrent(lat, lon),
+      this.getOWMAlerts(lat, lon),
+    ]);
+
+    const airForecast = airForecastResult.status === "fulfilled" ? airForecastResult.value : null;
+    const airCurrent = airCurrentResult.status === "fulfilled" ? airCurrentResult.value : null;
+    const alertsPayload = alertsResult.status === "fulfilled" ? alertsResult.value : null;
+
+    return this.transformOWMForecastData(payload, {
+      airForecast,
+      airCurrent,
+      alertsPayload,
+    });
+  },
+
+  async getOWMAirPollutionCurrent(lat, lon) {
+    if (!OWM_KEY) return null;
+
+    try {
+      const res = await fetch(
+        `${OWM_BASE}/air_pollution?lat=${lat}&lon=${lon}&appid=${OWM_KEY}`
+      );
+
+      if (!res.ok) {
+        return null;
+      }
+
+      return res.json();
+    } catch {
+      return null;
+    }
+  },
+
+  async getOWMAirPollutionForecast(lat, lon) {
+    if (!OWM_KEY) return null;
+
+    try {
+      const res = await fetch(
+        `${OWM_BASE}/air_pollution/forecast?lat=${lat}&lon=${lon}&appid=${OWM_KEY}`
+      );
+
+      if (!res.ok) {
+        return null;
+      }
+
+      return res.json();
+    } catch {
+      return null;
+    }
+  },
+
+  async getOWMAlerts(lat, lon) {
+    if (!OWM_KEY) return null;
+
+    try {
+      const res = await fetch(
+        `${OWM_ONECALL}?lat=${lat}&lon=${lon}&exclude=current,minutely,hourly,daily&units=metric&appid=${OWM_KEY}`
+      );
+
+      if (!res.ok) {
+        // Common for non-subscribed keys; keep silent fallback.
+        return null;
+      }
+
+      return res.json();
+    } catch {
+      return null;
+    }
   },
 
   /**
@@ -212,42 +298,38 @@ export const weatherService = {
     const preferOwm = WEATHER_PROVIDER === "owm";
     const preferWeatherApi = WEATHER_PROVIDER === "weatherapi";
 
-    if (!preferOwm && WEATHER_API_KEY) {
-      try {
-        const res = await fetch(
-          `${WEATHER_API_BASE}/current.json?key=${WEATHER_API_KEY}&q=${lat},${lon}&aqi=no`
-        );
-        if (!res.ok) return "Unknown";
-        const data = await res.json();
-        return data?.location?.name || "Unknown";
-      } catch {
-        return "Unknown";
-      }
-    }
+    const tryWeatherApi = async () => {
+      if (!WEATHER_API_KEY) return null;
+      const res = await fetch(
+        `${WEATHER_API_BASE}/current.json?key=${WEATHER_API_KEY}&q=${lat},${lon}&aqi=no`
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.location?.name || null;
+    };
 
-    if (OWM_KEY) {
-      try {
-        const res = await fetch(
-          `${OWM_GEO}/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${OWM_KEY}`
-        );
-        if (!res.ok) return "Unknown";
-        const data = await res.json();
-        return data?.[0]?.name || "Unknown";
-      } catch {
-        return "Unknown";
-      }
-    }
+    const tryOwm = async () => {
+      if (!OWM_KEY) return null;
+      const res = await fetch(
+        `${OWM_GEO}/reverse?lat=${lat}&lon=${lon}&limit=1&appid=${OWM_KEY}`
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data?.[0]?.name || null;
+    };
 
-    if (preferWeatherApi && WEATHER_API_KEY) {
+    const providers = preferWeatherApi
+      ? [tryWeatherApi, tryOwm]
+      : preferOwm
+        ? [tryOwm, tryWeatherApi]
+        : [tryWeatherApi, tryOwm];
+
+    for (const provider of providers) {
       try {
-        const res = await fetch(
-          `${WEATHER_API_BASE}/current.json?key=${WEATHER_API_KEY}&q=${lat},${lon}&aqi=no`
-        );
-        if (!res.ok) return "Unknown";
-        const data = await res.json();
-        return data?.location?.name || "Unknown";
+        const city = await provider();
+        if (city) return city;
       } catch {
-        return "Unknown";
+        // Try the next provider.
       }
     }
 
@@ -494,10 +576,36 @@ export const weatherService = {
     };
   },
 
-  transformOWMForecastData(payload) {
+  transformOWMForecastData(payload, options = {}) {
     const city = payload?.city || {};
     const list = payload?.list || [];
     const currentEntry = list[0] || {};
+    const airForecastList = options?.airForecast?.list || [];
+    const airCurrentAqi = options?.airCurrent?.list?.[0]?.main?.aqi ?? null;
+    const alertsRaw = options?.alertsPayload?.alerts || [];
+
+    const findClosestAqi = (targetDt) => {
+      if (!airForecastList.length) return null;
+
+      let closest = null;
+      let minDiff = Number.POSITIVE_INFINITY;
+
+      for (const item of airForecastList) {
+        const aqi = item?.main?.aqi;
+        const dt = Number(item?.dt || 0);
+        if (!aqi || !dt) continue;
+
+        const diff = Math.abs(dt - Number(targetDt || 0));
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = aqi;
+        }
+      }
+
+      return closest;
+    };
+
+    const currentAqi = findClosestAqi(currentEntry?.dt) ?? airCurrentAqi;
 
     // 3-hour steps from OWM forecast, roughly next 24 hours.
     const hourly = list.slice(0, 8).map((h) => ({
@@ -507,7 +615,7 @@ export const weatherService = {
       condition: h.weather?.[0]?.main || "",
       pop: Math.round((h.pop ?? 0) * 100),
       rainProbability: Math.round((h.pop ?? 0) * 100),
-      aqi: null,
+      aqi: findClosestAqi(h.dt),
     }));
 
     const groupedByDate = list.reduce((acc, entry) => {
@@ -547,13 +655,17 @@ export const weatherService = {
         description: currentEntry?.weather?.[0]?.description || "clear sky",
         icon: currentEntry?.weather?.[0]?.icon || "01d",
         uvi: 0,
-        aqi: null,
+        aqi: currentAqi,
         sunrise: city?.sunrise || 0,
         sunset: city?.sunset || 0,
       },
       hourly,
       daily,
-      alerts: [],
+      alerts: alertsRaw.map((a) => ({
+        event: a?.event || "Weather Alert",
+        description: a?.description || "Please stay alert for changing weather.",
+        severity: "warning",
+      })),
     };
   },
 };

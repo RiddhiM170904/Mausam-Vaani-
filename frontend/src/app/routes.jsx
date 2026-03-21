@@ -8,6 +8,7 @@ import AIChat from "../pages/AIChat";
 import Login from "../pages/Login";
 import Signup from "../pages/Signup";
 import Profile from "../pages/Profile";
+import Planner from "../pages/Planner";
 
 export default function AppRoutes() {
   return (
@@ -16,6 +17,7 @@ export default function AppRoutes() {
       <Route path="/forecast" element={<Forecast />} />
       <Route path="/map" element={<MapPage />} />
       <Route path="/alerts" element={<Alerts />} />
+      <Route path="/planner" element={<Planner />} />
       <Route path="/insights" element={<AIInsights />} />
       <Route path="/assistant" element={<AIChat />} />
       <Route path="/login" element={<Login />} />
