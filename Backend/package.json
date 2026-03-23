@@ -8,7 +8,7 @@
     "dev": "nodemon src/index.js",
     "test": "jest",
     "build": "npm install && npm run build",
-    "deploy": "npm run build && npm start"
+    "deploy": "npm start"
   },
   "keywords": ["weather", "api", "nodejs", "mongodb"],
   "author": "Mausam Vaani Team",
