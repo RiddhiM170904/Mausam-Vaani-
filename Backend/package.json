@@ -7,7 +7,7 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "test": "jest",
-    "build": "npm install && npm run build",
+    "build": "node -e \"console.log('No build step required for Backend')\"",
     "deploy": "npm start"
   },
   "keywords": ["weather", "api", "nodejs", "mongodb"],
