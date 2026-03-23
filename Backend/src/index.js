@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 // Import routes
@@ -100,13 +101,26 @@ app.use('/api', notificationJobsRoutes);
 // ===========================================
 
 if (process.env.NODE_ENV === 'production') {
-  // Serve static files from the React app
-  app.use(express.static(path.join(__dirname, '../../Frontend/dist')));
+  const frontendDistPath = path.join(__dirname, '../../frontend/dist');
+  const frontendIndexPath = path.join(frontendDistPath, 'index.html');
 
-  // Handle React routing, return all requests to React app
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../../Frontend/dist', 'index.html'));
-  });
+  if (fs.existsSync(frontendIndexPath)) {
+    // Serve static files from the React app when dist exists in this deployment.
+    app.use(express.static(frontendDistPath));
+
+    // Handle React routing, return all requests to React app.
+    app.get('*', (req, res) => {
+      res.sendFile(frontendIndexPath);
+    });
+  } else {
+    // Backend-only production deploy (e.g., serverless/API-only).
+    app.use((req, res) => {
+      res.status(404).json({
+        success: false,
+        message: 'Route not found',
+      });
+    });
+  }
 } else {
   // 404 handler for development
   app.use((req, res) => {
