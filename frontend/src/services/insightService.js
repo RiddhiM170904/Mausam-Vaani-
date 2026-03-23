@@ -1,5 +1,246 @@
-// AI Backend URL (FastAPI)
-const AI_BACKEND_URL = import.meta.env.VITE_AI_BACKEND_URL || "http://localhost:8000";
+import { getPersonalizedInsight } from "../../AI/index.js";
+
+const INSIGHT_CACHE_PREFIX = "mv_ai_quick_insight_v5";
+const INSIGHT_LAST_ACTIVE_KEY = "mv_ai_last_active_at";
+const INSIGHT_INACTIVITY_MS = 60 * 60 * 1000;
+const AI_INSIGHT_DEBUG_PREFIX = "[AIInsightDebug]";
+const MAX_INSIGHT_WORDS = 55;
+
+function nowMs() {
+  return Date.now();
+}
+
+function readCache(cacheKey) {
+  try {
+    const raw = localStorage.getItem(cacheKey);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(cacheKey, payload) {
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify(payload));
+  } catch {
+    // Ignore storage errors and continue without cache.
+  }
+}
+
+function buildSessionInsightKey(data = {}) {
+  const userId = data?.userId || data?.user_id || "guest";
+  const lat = Number(data?.latitude ?? data?.location?.lat);
+  const lon = Number(data?.longitude ?? data?.location?.lon);
+  const persona = String(data?.persona || data?.user_profile?.user_type || "general").toLowerCase();
+  const requirementsKey = String(data?.requirements || data?.notes || "")
+    .trim()
+    .toLowerCase()
+    .slice(0, 80)
+    .replace(/\s+/g, " ");
+  const temp = Number(data?.weatherData?.current?.temp);
+  const rain = Number(data?.weatherData?.current?.rain_probability ?? data?.weatherData?.rain_probability);
+  const tempBucket = Number.isFinite(temp) ? Math.round(temp / 2) : "na";
+  const rainBucket = Number.isFinite(rain) ? Math.round(rain * 10) : "na";
+  const latKey = Number.isFinite(lat) ? lat.toFixed(2) : "na";
+  const lonKey = Number.isFinite(lon) ? lon.toFixed(2) : "na";
+  const now = new Date();
+  const monthKey = now.toLocaleString('en-IN', { month: 'short' }).toLowerCase();
+  const timeWindowKey = Math.floor(now.getHours() / 4);
+  return `${INSIGHT_CACHE_PREFIX}:${userId}:${persona}:${latKey}:${lonKey}:${monthKey}:w${timeWindowKey}:t${tempBucket}:r${rainBucket}:${requirementsKey}`;
+}
+
+function updateLastActive() {
+  try {
+    localStorage.setItem(INSIGHT_LAST_ACTIVE_KEY, String(nowMs()));
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+function isSessionActive() {
+  const raw = localStorage.getItem(INSIGHT_LAST_ACTIVE_KEY);
+  const lastActive = Number(raw || 0);
+  if (!Number.isFinite(lastActive) || !lastActive) {
+    return false;
+  }
+
+  return nowMs() - lastActive <= INSIGHT_INACTIVITY_MS;
+}
+
+function toWords(text) {
+  return String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+}
+
+function isIncompleteMessage(text) {
+  const cleaned = String(text || "").trim();
+  if (!cleaned) return true;
+
+  const words = toWords(cleaned);
+  if (words.length < 14) return true;
+
+  if (/(\bke|\bki|\bka|\baur|\bto|\bpar|\bme|\bmein|\bya|\bwith|\band)[.!?]?$/i.test(cleaned)) {
+    return true;
+  }
+
+  return false;
+}
+
+function enforceInsightWordRange(text, maxWords = MAX_INSIGHT_WORDS) {
+  let message = String(text || "").replace(/\s+/g, " ").trim();
+
+  if (!message) {
+    message =
+      "Aaj weather thoda changeable hai, isliye plan smart rakho. Hydration, light protection, aur travel timing pe focus karo. Agar conditions shift ho, short breaks lo aur next few hours ka forecast dobara check kar lena.";
+  }
+
+  const words = toWords(message);
+  if (words.length > maxWords) {
+    const connectors = new Set(["aur", "or", "to", "ke", "ki", "ka", "me", "mein", "par", "pe", "ya", "for", "and", "with", "the", "a", "an", "ko", "se", "hai"]);
+    let clipped = words.slice(0, maxWords);
+
+    while (clipped.length > 18 && connectors.has(String(clipped[clipped.length - 1] || "").toLowerCase())) {
+      clipped.pop();
+    }
+
+    message = clipped.join(" ").replace(/[,:;\-]+$/, "").trim();
+  }
+
+  if (message && !/[.!?]$/.test(message)) {
+    message = `${message}.`;
+  }
+
+  return message;
+}
+
+function normalizeInsightMessage(text) {
+  let message = String(text || '').replace(/\s+/g, ' ').trim();
+
+  // Home card already renders user greeting, so remove repeated opening greeting from model output.
+  message = message
+    .replace(/^hey\s+[a-zA-Z][a-zA-Z\s]{0,20}\s*👋\s*/i, '')
+    .replace(/^hey\s*👋\s*/i, '')
+    .replace(/^hi\s+[a-zA-Z][a-zA-Z\s]{0,20}\s*👋\s*/i, '')
+    .replace(/^hi\s*👋\s*/i, '')
+    .trim();
+
+  return message;
+}
+
+function normalizeTipText(text, severity = 'medium') {
+  const raw = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return '';
+
+  if (/moderate air quality/i.test(raw)) {
+    return '';
+  }
+
+  if (/unhealthy air quality|severe air quality/i.test(raw)) {
+    return '';
+  }
+
+  if (/high temperature conditions/i.test(raw)) {
+    return 'Dhoop tez ho sakti hai; paani saath rakho aur 12-4 PM heavy outdoor kaam avoid karo.';
+  }
+
+  if (/heavy rainfall likely/i.test(raw)) {
+    return 'Baarish ka chance strong hai; umbrella ya raincoat ready rakho.';
+  }
+
+  if (/strong winds expected/i.test(raw)) {
+    return 'Hawa tez ho sakti hai; travel me speed controlled rakho.';
+  }
+
+  if (severity === 'low' && raw.split(' ').length <= 3) {
+    return '';
+  }
+
+  return raw;
+}
+
+function buildActionableTips(aiData) {
+  const tips = [];
+  const notifications = Array.isArray(aiData?.notifications) ? aiData.notifications : [];
+  const rag = Array.isArray(aiData?.rag_context) ? aiData.rag_context : [];
+
+  notifications.forEach((item) => {
+    const text = String(item?.message || '').trim();
+    if (text) tips.push(text);
+  });
+
+  rag.forEach((item) => {
+    const tip = normalizeTipText(item?.text, item?.severity || 'medium');
+    if (tip) tips.push(tip);
+  });
+
+  return [...new Set(tips)].slice(0, 5);
+}
+
+function inferRiskLevelFromWeather(weatherData = {}, risks = []) {
+  const current = weatherData?.current || {};
+  const temp = Number(current?.temp || 0);
+  const wind = Number(current?.wind || 0);
+  const condition = String(current?.condition || '').toLowerCase();
+
+  let score = 0;
+  if (temp >= 40) score += 3;
+  else if (temp >= 35) score += 2;
+  else if (temp >= 31) score += 1;
+
+  if (condition.includes('rain') || condition.includes('storm') || condition.includes('thunder')) score += 2;
+  if (condition.includes('fog') || condition.includes('mist')) score += 1;
+  if (wind >= 25) score += 2;
+  else if (wind >= 16) score += 1;
+
+  if (Array.isArray(risks) && risks.length > 0) score += 1;
+
+  if (score >= 4) return 'High';
+  if (score >= 2) return 'Medium';
+  return 'Low';
+}
+
+function extractPlannerWindows(text = '') {
+  const content = String(text || '');
+  const timeRangeMatch = content.match(/(\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\s?(?:-|to)\s?\d{1,2}(?::\d{2})?\s?(?:am|pm)\b)/i);
+  const singleTimeMatch = content.match(/\b(\d{1,2}(?::\d{2})?\s?(?:am|pm))\b/i);
+  const twentyFourRangeMatch = content.match(/\b([01]?\d|2[0-3]):[0-5]\d\s?(?:-|to)\s?([01]?\d|2[0-3]):[0-5]\d\b/i);
+  const twentyFourSingleMatch = content.match(/\b([01]?\d|2[0-3]):[0-5]\d\b/);
+
+  return {
+    bestTime: timeRangeMatch?.[1] || singleTimeMatch?.[1] || twentyFourRangeMatch?.[0] || twentyFourSingleMatch?.[0] || null,
+    avoidTime: /avoid|mat|stay indoor|indoors|peak heat|loo/i.test(content)
+      ? (timeRangeMatch?.[1] || twentyFourRangeMatch?.[0] || null)
+      : null,
+  };
+}
+
+function buildPlannerRequirements(plannerData = {}) {
+  const activity = plannerData?.activity || 'daily routine';
+  const date = plannerData?.date || 'today';
+  const start = plannerData?.timeRange?.start || '09:00';
+  const end = plannerData?.timeRange?.end || '18:00';
+  const duration = plannerData?.duration || 'not specified';
+  const risks = Array.isArray(plannerData?.risks) && plannerData.risks.length
+    ? plannerData.risks.join(', ')
+    : 'none';
+  const notes = plannerData?.notes || 'none';
+
+  return [
+    'Planner mode enabled.',
+    `User activity: ${activity}.`,
+    `Date: ${date}.`,
+    `Time range: ${start} to ${end}.`,
+    `Duration preference: ${duration}.`,
+    `Risk priorities: ${risks}.`,
+    `User notes: ${notes}.`,
+    'Give recommendation in Hinglish with practical timing guidance and safety actions.',
+    'Mention best time window and avoid window naturally in the response if risk exists.',
+  ].join(' ');
+}
 
 /**
  * AI Insight service — provides quick insights and comprehensive planning.
@@ -7,7 +248,7 @@ const AI_BACKEND_URL = import.meta.env.VITE_AI_BACKEND_URL || "http://localhost:
  * 1. Quick Insight (Dashboard) - fast, lightweight advice
  * 2. Smart Planner - comprehensive scenario-based predictions
  * 
- * Calls FastAPI AI-Backend for Gemini-powered insights
+ * Uses frontend AI pipeline (weather + RAG + Gemini) for insights
  */
 export const insightService = {
   /**
@@ -16,39 +257,106 @@ export const insightService = {
    * @param {Object} data - Object containing weatherData, persona, location, weatherRisks
    */
   async getQuickInsight(data) {
+    const cacheKey = buildSessionInsightKey(data);
+    const cached = readCache(cacheKey);
+    const cachedMessage = cached?.value?.message;
+    const canUseCached = cached && isSessionActive() && !isIncompleteMessage(cachedMessage);
+
+    if (canUseCached) {
+      if (cached?.value && typeof cached.value === "object") {
+        cached.value.message = normalizeInsightMessage(enforceInsightWordRange(cached?.value?.message));
+        if (Array.isArray(cached.value.tips)) {
+          cached.value.tips = cached.value.tips
+            .map((tip) => normalizeTipText(tip, 'medium'))
+            .filter(Boolean)
+            .slice(0, 5);
+        }
+      }
+      console.info(`${AI_INSIGHT_DEBUG_PREFIX} cache hit`, {
+        cacheKey,
+        source: cached?.value?.source || cached?.value?.llm_source || "cache",
+      });
+      updateLastActive();
+      return cached.value;
+    }
+
     const { weatherData, persona = 'general', location = null, weatherRisks = [] } = data || {};
     const lat = data?.latitude ?? location?.lat ?? null;
     const lon = data?.longitude ?? location?.lon ?? null;
     const locationName = data?.location_name || location?.city || location?.formattedAddress || 'Unknown';
-    
+
+    console.info(`${AI_INSIGHT_DEBUG_PREFIX} request start`, {
+      cacheKey,
+      userId: data?.userId || data?.user_id || null,
+      persona,
+      lat,
+      lon,
+      locationName,
+      hasRequirements: Boolean(data?.requirements),
+    });
+
     try {
-      // Call FastAPI AI-Backend
-      const response = await fetch(`${AI_BACKEND_URL}/quick-insight`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const aiPayload = {
+        user_id: data?.userId || data?.user_id || null,
+        location: {
+          lat,
+          lon,
         },
-        body: JSON.stringify({
-          weatherData,
-          persona,
-          location,
-          latitude: lat,
-          longitude: lon,
-          location_name: locationName,
-          weatherRisks,
-          timestamp: new Date().toISOString()
-        })
+        user_profile: {
+          user_id: data?.userId || data?.user_id || null,
+          user_type: persona,
+          location: {
+            lat,
+            lon,
+            city: locationName,
+          },
+          profile: {
+            weather_risks: weatherRisks,
+            planner_answers: data?.plannerProfile?.answers || {},
+          },
+        },
+        requirements:
+          data?.requirements ||
+          data?.notes ||
+          "Provide short, actionable weather guidance for this user.",
+      };
+
+      const aiResult = await getPersonalizedInsight(aiPayload);
+      const payload = {
+        success: true,
+        title: "AI Insight",
+        message: normalizeInsightMessage(enforceInsightWordRange(aiResult?.data?.insight || "No insight available yet.")),
+        tips: buildActionableTips(aiResult?.data),
+        source: aiResult?.data?.llm_source || "fallback",
+        ai: aiResult?.data || null,
+      };
+
+      writeCache(cacheKey, {
+        value: payload,
+        savedAt: nowMs(),
       });
-      
-      if (!response.ok) {
-        throw new Error(`AI Backend error: ${response.status}`);
-      }
-      
-      return await response.json();
+      updateLastActive();
+
+      console.info(`${AI_INSIGHT_DEBUG_PREFIX} response`, {
+        cacheKey,
+        source: payload.source,
+        messagePreview: String(payload.message || "").slice(0, 120),
+      });
+
+      return payload;
     } catch (error) {
-      console.warn('AI Backend quick-insight failed:', error.message);
-      // Fallback to local smart advice if API fails
-      return this.generateLocalInsight(weatherData, persona, weatherRisks);
+      console.warn(`${AI_INSIGHT_DEBUG_PREFIX} quick-insight failed`, {
+        cacheKey,
+        error: error.message,
+      });
+
+      const fallback = this.generateLocalInsight(weatherData, persona, weatherRisks);
+      writeCache(cacheKey, {
+        value: fallback,
+        savedAt: nowMs(),
+      });
+      updateLastActive();
+      return fallback;
     }
   },
 
@@ -58,24 +366,69 @@ export const insightService = {
    * Calls FastAPI AI-Backend with Gemini integration
    */
   async getSmartPlan(plannerData) {
+    console.info(`${AI_INSIGHT_DEBUG_PREFIX} planner request start`, {
+      activity: plannerData?.activity,
+      persona: plannerData?.persona,
+    });
+
     try {
-      // Call FastAPI AI-Backend
-      const response = await fetch(`${AI_BACKEND_URL}/planner`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const location = plannerData?.location || {};
+      const lat = plannerData?.latitude ?? location?.lat ?? null;
+      const lon = plannerData?.longitude ?? location?.lon ?? null;
+
+      const aiPayload = {
+        intent: 'planner',
+        user_id: plannerData?.userId || plannerData?.user_id || null,
+        location: { lat, lon },
+        planner_context: {
+          activity: plannerData?.activity || 'daily_routine',
+          date: plannerData?.date || 'today',
+          time_range: plannerData?.timeRange || { start: '09:00', end: '18:00' },
+          time_preset: plannerData?.timePreset || 'custom',
+          duration: plannerData?.duration || null,
+          risks: plannerData?.risks || [],
+          notes: plannerData?.notes || '',
         },
-        body: JSON.stringify(plannerData)
-      });
-      
-      if (!response.ok) {
-        throw new Error(`AI Backend error: ${response.status}`);
-      }
-      
-      return await response.json();
+        user_profile: {
+          user_id: plannerData?.userId || plannerData?.user_id || null,
+          user_type: plannerData?.persona || 'general',
+          location: {
+            lat,
+            lon,
+            city: plannerData?.location?.city || plannerData?.location_name || 'Unknown',
+          },
+          profile: {
+            weather_risks: plannerData?.risks || [],
+            planner_answers: plannerData?.plannerProfile?.answers || {},
+          },
+        },
+        requirements: buildPlannerRequirements(plannerData),
+      };
+
+      const aiResult = await getPersonalizedInsight(aiPayload);
+      const recommendationRaw = aiResult?.data?.insight || 'No planner recommendation available yet.';
+      const recommendation = enforceInsightWordRange(recommendationRaw, 95);
+      const windows = extractPlannerWindows(recommendationRaw);
+      const riskLevel = inferRiskLevelFromWeather(plannerData?.weatherData, plannerData?.risks || []);
+
+      const tips = buildActionableTips(aiResult?.data);
+
+      return {
+        success: true,
+        recommendation,
+        bestTime: windows.bestTime || `${plannerData?.timeRange?.start || '09:00'}-${plannerData?.timeRange?.end || '18:00'}`,
+        avoidTime: windows.avoidTime || null,
+        riskLevel,
+        tips,
+        activity: plannerData?.activity,
+        source: aiResult?.data?.llm_source || 'ai',
+        ai: aiResult?.data || null,
+      };
     } catch (error) {
-      console.warn('AI Backend planner failed:', error.message);
-      // Fallback to rule-based advice
+      console.warn(`${AI_INSIGHT_DEBUG_PREFIX} planner ai failed`, {
+        activity: plannerData?.activity,
+        error: error?.message,
+      });
       return this.generateLocalPlan(plannerData);
     }
   },
@@ -185,7 +538,7 @@ export const insightService = {
     return {
       success: true,
       title: title,
-      message: primaryMessage,
+      message: enforceInsightWordRange(primaryMessage),
       tips: insights,
       source: 'local'
     };

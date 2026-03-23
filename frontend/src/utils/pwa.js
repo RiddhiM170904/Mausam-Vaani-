@@ -1,9 +1,16 @@
 // Service Worker registration and PWA utilities
 
+let swRegistrationInFlight = null;
+
 export const registerSW = async () => {
   if ('serviceWorker' in navigator) {
+    if (swRegistrationInFlight) {
+      return swRegistrationInFlight;
+    }
+
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js');
+      swRegistrationInFlight = navigator.serviceWorker.register('/sw.js');
+      const registration = await swRegistrationInFlight;
       
       registration.addEventListener('updatefound', () => {
         const newWorker = registration.installing;
@@ -24,6 +31,8 @@ export const registerSW = async () => {
     } catch (registrationError) {
       console.log('SW registration failed: ', registrationError);
       return null;
+    } finally {
+      swRegistrationInFlight = null;
     }
   }
   return null;

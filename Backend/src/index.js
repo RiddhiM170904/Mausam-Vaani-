@@ -12,6 +12,7 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
 const weatherRoutes = require('./routes/weather');
 const aiRoutes = require('./routes/ai');
+const intelligenceRoutes = require('./routes/intelligence');
 
 const app = express();
 
@@ -86,6 +87,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/weather', weatherRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/intelligence', intelligenceRoutes);
 
 // ===========================================
 // SERVE FRONTEND IN PRODUCTION

@@ -5,6 +5,10 @@ const OWM_BASE = "https://api.openweathermap.org/data/2.5";
 const OWM_GEO = "https://api.openweathermap.org/geo/1.0";
 const OWM_ONECALL = "https://api.openweathermap.org/data/3.0/onecall";
 const GOOGLE_PLACES_API_KEY = import.meta.env.VITE_GOOGLE_PLACES_API_KEY || "";
+const ENABLE_GOOGLE_PLACES = (import.meta.env.VITE_ENABLE_GOOGLE_PLACES || "false").toLowerCase() === "true";
+const ENABLE_OSM_REVERSE = (import.meta.env.VITE_ENABLE_OSM_REVERSE || "false").toLowerCase() === "true";
+const ENABLE_OWM_ALERTS = (import.meta.env.VITE_ENABLE_OWM_ALERTS || "false").toLowerCase() === "true";
+const ENABLE_WEATHERAPI_AQI = (import.meta.env.VITE_ENABLE_WEATHERAPI_AQI || "false").toLowerCase() === "true";
 const WEATHER_PROVIDER = (import.meta.env.VITE_WEATHER_PROVIDER || "auto").toLowerCase();
 const WEATHER_DEBUG_PREFIX = "[WeatherDebug]";
 const WEATHER_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -15,14 +19,48 @@ const placesResponseCache = new Map();
 const placesInFlightRequests = new Map();
 const OSM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse";
 let hasLoggedPlaces403 = false;
+let disableGooglePlacesForSession = false;
+let disableOwmOneCallAlertsForSession = false;
+let disableWeatherApiAqiForSession = false;
+let hasLoggedWeatherApiAuthError = false;
 
 const getCoordCacheKey = (lat, lon) => `${Number(lat).toFixed(4)},${Number(lon).toFixed(4)}`;
+
+const US_AQI_BREAKPOINTS_PM25 = [
+  { cLow: 0.0, cHigh: 12.0, iLow: 0, iHigh: 50 },
+  { cLow: 12.1, cHigh: 35.4, iLow: 51, iHigh: 100 },
+  { cLow: 35.5, cHigh: 55.4, iLow: 101, iHigh: 150 },
+  { cLow: 55.5, cHigh: 150.4, iLow: 151, iHigh: 200 },
+  { cLow: 150.5, cHigh: 250.4, iLow: 201, iHigh: 300 },
+  { cLow: 250.5, cHigh: 350.4, iLow: 301, iHigh: 400 },
+  { cLow: 350.5, cHigh: 500.4, iLow: 401, iHigh: 500 },
+];
+
+const toUsAqiFromPm25 = (pm25) => {
+  const value = Number(pm25);
+  if (!Number.isFinite(value) || value < 0) return null;
+
+  const capped = Math.min(value, 500.4);
+  const band = US_AQI_BREAKPOINTS_PM25.find((b) => capped >= b.cLow && capped <= b.cHigh);
+  if (!band) return null;
+
+  const aqi =
+    ((band.iHigh - band.iLow) / (band.cHigh - band.cLow)) *
+      (capped - band.cLow) +
+    band.iLow;
+
+  return Math.round(aqi);
+};
 
 /**
   * Weather service — calls OpenWeatherMap directly.
  */
 export const weatherService = {
   async getOpenStreetHyperlocalPlace(lat, lon) {
+    if (!ENABLE_OSM_REVERSE) {
+      return null;
+    }
+
     try {
       const response = await fetch(
         `${OSM_REVERSE_URL}?format=jsonv2&lat=${Number(lat)}&lon=${Number(lon)}&zoom=18&addressdetails=1&namedetails=1`,
@@ -219,21 +257,49 @@ export const weatherService = {
     const payload = await response.json();
 
     // Optional enrichment calls. These should not block the core weather response.
-    const [airForecastResult, airCurrentResult, alertsResult] = await Promise.allSettled([
+    const [airForecastResult, airCurrentResult, alertsResult, weatherApiAqiResult] = await Promise.allSettled([
       this.getOWMAirPollutionForecast(lat, lon),
       this.getOWMAirPollutionCurrent(lat, lon),
       this.getOWMAlerts(lat, lon),
+      this.getWeatherApiCurrentAqi(lat, lon),
     ]);
 
     const airForecast = airForecastResult.status === "fulfilled" ? airForecastResult.value : null;
     const airCurrent = airCurrentResult.status === "fulfilled" ? airCurrentResult.value : null;
     const alertsPayload = alertsResult.status === "fulfilled" ? alertsResult.value : null;
+    const weatherApiAqi = weatherApiAqiResult.status === "fulfilled" ? weatherApiAqiResult.value : null;
 
     return this.transformOWMForecastData(payload, {
       airForecast,
       airCurrent,
+      weatherApiAqi,
       alertsPayload,
     });
+  },
+
+  async getWeatherApiCurrentAqi(lat, lon) {
+    if (!ENABLE_WEATHERAPI_AQI || !WEATHER_API_KEY || disableWeatherApiAqiForSession) return null;
+
+    try {
+      const res = await fetch(
+        `${WEATHER_API_BASE}/current.json?key=${WEATHER_API_KEY}&q=${lat},${lon}&aqi=yes`
+      );
+
+      if (!res.ok) {
+        if ((res.status === 401 || res.status === 403) && !hasLoggedWeatherApiAuthError) {
+          hasLoggedWeatherApiAuthError = true;
+          disableWeatherApiAqiForSession = true;
+          console.warn(`${WEATHER_DEBUG_PREFIX} WeatherAPI AQI enrichment disabled for this session (auth error ${res.status}).`);
+        }
+        return null;
+      }
+
+      const payload = await res.json();
+      const epa = payload?.current?.air_quality?.["us-epa-index"];
+      return Number.isFinite(epa) ? Number(epa) : null;
+    } catch {
+      return null;
+    }
   },
 
   async getOWMAirPollutionCurrent(lat, lon) {
@@ -273,7 +339,7 @@ export const weatherService = {
   },
 
   async getOWMAlerts(lat, lon) {
-    if (!OWM_KEY) return null;
+    if (!OWM_KEY || !ENABLE_OWM_ALERTS || disableOwmOneCallAlertsForSession) return null;
 
     try {
       const res = await fetch(
@@ -281,6 +347,9 @@ export const weatherService = {
       );
 
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          disableOwmOneCallAlertsForSession = true;
+        }
         // Common for non-subscribed keys; keep silent fallback.
         return null;
       }
@@ -355,8 +424,10 @@ export const weatherService = {
       return existing;
     }
 
-    if (!GOOGLE_PLACES_API_KEY) {
-      const osmFallback = await this.getOpenStreetHyperlocalPlace(lat, lon);
+    if (!ENABLE_GOOGLE_PLACES || !GOOGLE_PLACES_API_KEY || disableGooglePlacesForSession) {
+      const osmFallback = ENABLE_OSM_REVERSE
+        ? await this.getOpenStreetHyperlocalPlace(lat, lon)
+        : null;
       placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
       return osmFallback;
     }
@@ -388,6 +459,7 @@ export const weatherService = {
         const errorBody = await response.text().catch(() => "");
         if (response.status === 403 && !hasLoggedPlaces403) {
           hasLoggedPlaces403 = true;
+          disableGooglePlacesForSession = true;
           console.warn(`${WEATHER_DEBUG_PREFIX} Places lookup failed (403). Enable Places API (New), attach billing, and allow localhost referrer for this key.`);
         } else if (response.status !== 403) {
           console.warn(`${WEATHER_DEBUG_PREFIX} Places lookup failed`, {
@@ -395,7 +467,9 @@ export const weatherService = {
             body: errorBody?.slice?.(0, 150),
           });
         }
-        const osmFallback = await this.getOpenStreetHyperlocalPlace(lat, lon);
+        const osmFallback = ENABLE_OSM_REVERSE
+          ? await this.getOpenStreetHyperlocalPlace(lat, lon)
+          : null;
         placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
         return osmFallback;
       }
@@ -404,14 +478,18 @@ export const weatherService = {
       const place = payload?.places?.[0];
 
       if (!place) {
-        const osmFallback = await this.getOpenStreetHyperlocalPlace(lat, lon);
+        const osmFallback = ENABLE_OSM_REVERSE
+          ? await this.getOpenStreetHyperlocalPlace(lat, lon)
+          : null;
         placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
         return osmFallback;
       }
 
       const name = place?.displayName?.text || place?.formattedAddress || null;
       if (!name) {
-        const osmFallback = await this.getOpenStreetHyperlocalPlace(lat, lon);
+        const osmFallback = ENABLE_OSM_REVERSE
+          ? await this.getOpenStreetHyperlocalPlace(lat, lon)
+          : null;
         placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
         return osmFallback;
       }
@@ -430,6 +508,9 @@ export const weatherService = {
       return result;
     })().catch(async (err) => {
       console.warn(`${WEATHER_DEBUG_PREFIX} Places lookup error`, err?.message || err);
+      if (!ENABLE_OSM_REVERSE) {
+        return null;
+      }
       return this.getOpenStreetHyperlocalPlace(lat, lon);
     }).finally(() => {
       placesInFlightRequests.delete(key);
@@ -563,6 +644,17 @@ export const weatherService = {
         icon: current?.condition?.icon ? `https:${current.condition.icon}` : "",
         uvi: current?.uv ?? 0,
         aqi: current?.air_quality?.["us-epa-index"] || null,
+        aqiUs: toUsAqiFromPm25(current?.air_quality?.pm2_5),
+        pollutants: {
+          co: Number.isFinite(Number(current?.air_quality?.co)) ? Number(current.air_quality.co) : null,
+          no: Number.isFinite(Number(current?.air_quality?.no)) ? Number(current.air_quality.no) : null,
+          no2: Number.isFinite(Number(current?.air_quality?.no2)) ? Number(current.air_quality.no2) : null,
+          o3: Number.isFinite(Number(current?.air_quality?.o3)) ? Number(current.air_quality.o3) : null,
+          so2: Number.isFinite(Number(current?.air_quality?.so2)) ? Number(current.air_quality.so2) : null,
+          nh3: Number.isFinite(Number(current?.air_quality?.nh3)) ? Number(current.air_quality.nh3) : null,
+          pm2_5: Number.isFinite(Number(current?.air_quality?.pm2_5)) ? Number(current.air_quality.pm2_5) : null,
+          pm10: Number.isFinite(Number(current?.air_quality?.pm10)) ? Number(current.air_quality.pm10) : null,
+        },
         sunrise: toUnix(firstDay?.astro?.sunrise),
         sunset: toUnix(firstDay?.astro?.sunset),
       },
@@ -582,6 +674,7 @@ export const weatherService = {
     const currentEntry = list[0] || {};
     const airForecastList = options?.airForecast?.list || [];
     const airCurrentAqi = options?.airCurrent?.list?.[0]?.main?.aqi ?? null;
+    const weatherApiAqi = options?.weatherApiAqi ?? null;
     const alertsRaw = options?.alertsPayload?.alerts || [];
 
     const findClosestAqi = (targetDt) => {
@@ -602,10 +695,49 @@ export const weatherService = {
         }
       }
 
+      return Number.isFinite(Number(closest)) ? Math.round(Number(closest)) : null;
+    };
+
+    const findClosestAirSnapshot = (targetDt) => {
+      if (!airForecastList.length) return null;
+
+      let closest = null;
+      let minDiff = Number.POSITIVE_INFINITY;
+
+      for (const item of airForecastList) {
+        const dt = Number(item?.dt || 0);
+        if (!dt) continue;
+
+        const diff = Math.abs(dt - Number(targetDt || 0));
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = item;
+        }
+      }
+
       return closest;
     };
 
-    const currentAqi = findClosestAqi(currentEntry?.dt) ?? airCurrentAqi;
+    const currentAir = findClosestAirSnapshot(currentEntry?.dt) || options?.airCurrent?.list?.[0] || null;
+    const currentAqi = findClosestAqi(currentEntry?.dt) ?? (Number.isFinite(Number(airCurrentAqi)) ? Math.round(Number(airCurrentAqi)) : null) ?? (Number.isFinite(Number(weatherApiAqi)) ? Math.round(Number(weatherApiAqi)) : null);
+
+    const toPollutants = (snapshot) => {
+      const c = snapshot?.components || {};
+      const asNumber = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
+      return {
+        co: asNumber(c.co),
+        no: asNumber(c.no),
+        no2: asNumber(c.no2),
+        o3: asNumber(c.o3),
+        so2: asNumber(c.so2),
+        nh3: asNumber(c.nh3),
+        pm2_5: asNumber(c.pm2_5),
+        pm10: asNumber(c.pm10),
+      };
+    };
+
+    const currentPollutants = toPollutants(currentAir);
+    const currentUsAqi = toUsAqiFromPm25(currentPollutants.pm2_5);
 
     // 3-hour steps from OWM forecast, roughly next 24 hours.
     const hourly = list.slice(0, 8).map((h) => ({
@@ -615,7 +747,9 @@ export const weatherService = {
       condition: h.weather?.[0]?.main || "",
       pop: Math.round((h.pop ?? 0) * 100),
       rainProbability: Math.round((h.pop ?? 0) * 100),
-      aqi: findClosestAqi(h.dt),
+      aqi: findClosestAqi(h.dt) ?? currentAqi,
+      pollutants: toPollutants(findClosestAirSnapshot(h.dt)),
+      aqiUs: toUsAqiFromPm25(toPollutants(findClosestAirSnapshot(h.dt)).pm2_5) ?? currentUsAqi,
     }));
 
     const groupedByDate = list.reduce((acc, entry) => {
@@ -656,6 +790,8 @@ export const weatherService = {
         icon: currentEntry?.weather?.[0]?.icon || "01d",
         uvi: 0,
         aqi: currentAqi,
+        aqiUs: currentUsAqi,
+        pollutants: currentPollutants,
         sunrise: city?.sunrise || 0,
         sunset: city?.sunset || 0,
       },

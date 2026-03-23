@@ -59,6 +59,24 @@ const userSchema = new mongoose.Schema({
     default: 'en',
   },
 
+  profile: {
+    vehicle: {
+      type: String,
+      enum: ['bike', 'car', 'scooter', 'truck', 'bus', 'none', 'other'],
+      default: 'none',
+    },
+    distance: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+  },
+
+  notificationToken: {
+    type: String,
+    default: null,
+  },
+
   // Weather Interests/Risks
   weatherRisks: [{
     type: String,
@@ -197,7 +215,9 @@ userSchema.methods.toPublicJSON = function() {
     location: this.location,
     persona: this.persona,
     language: this.language,
+    profile: this.profile,
     preferences: this.preferences,
+    notificationToken: this.notificationToken,
     points: this.points,
     weatherReports: this.weatherReports,
     badges: this.badges,

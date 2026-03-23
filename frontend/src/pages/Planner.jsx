@@ -64,6 +64,17 @@ const DURATION_OPTIONS = [
   { value: 10, label: "Extended" },
 ];
 
+const TIME_PRESETS = [
+  { id: "now", label: "Now" },
+  { id: "next_2_hours", label: "Next 2 hrs" },
+  { id: "evening", label: "Evening" },
+  { id: "custom", label: "Custom" },
+];
+
+function toHHMM(date) {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
 const buildProfileQuestions = (persona) => {
   const personaConfig = profileConfig.user_types?.[persona] || profileConfig.user_types?.general;
   const compulsory = personaConfig?.compulsory || [];
@@ -94,6 +105,7 @@ export default function Planner() {
   const [customActivity, setCustomActivity] = useState("");
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [timeRange, setTimeRange] = useState({ start: "09:00", end: "18:00" });
+  const [timePreset, setTimePreset] = useState("custom");
   const [risks, setRisks] = useState([]);
   const [duration, setDuration] = useState(4);
   const [notes, setNotes] = useState("");
@@ -217,6 +229,29 @@ export default function Planner() {
     );
   };
 
+  const applyTimePreset = (preset) => {
+    const now = new Date();
+    let start = new Date(now);
+    let end = new Date(now);
+
+    if (preset === "now") {
+      end = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+    } else if (preset === "next_2_hours") {
+      start = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+      end = new Date(now.getTime() + 4 * 60 * 60 * 1000);
+    } else if (preset === "evening") {
+      start = new Date(now);
+      start.setHours(18, 0, 0, 0);
+      end = new Date(now);
+      end.setHours(20, 0, 0, 0);
+    }
+
+    if (preset !== "custom") {
+      setTimeRange({ start: toHHMM(start), end: toHHMM(end) });
+    }
+    setTimePreset(preset);
+  };
+
   // Generate smart plan
   const generatePlan = async () => {
     if (!activity) return;
@@ -226,8 +261,10 @@ export default function Planner() {
     
     try {
       const plannerData = {
+        userId: user?.id || null,
         persona: profileUserType || 'general',
         location: location,
+        location_name: location?.city || weatherData?.city || 'Unknown',
         weatherData: weatherData,
         plannerProfile: {
           persona: profileUserType || 'general',
@@ -236,6 +273,7 @@ export default function Planner() {
         },
         activity: activity === 'other' ? customActivity : activity,
         date: selectedDate,
+        timePreset,
         timeRange: timeRange,
         risks: risks,
         duration: duration,
@@ -623,6 +661,21 @@ export default function Planner() {
                 <Calendar className="w-4 h-4 text-indigo-400" />
                 When?
               </h3>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {TIME_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    onClick={() => applyTimePreset(preset.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                      timePreset === preset.id
+                        ? "bg-indigo-500/20 border-indigo-500/50 text-indigo-200"
+                        : "bg-gray-800/50 border-gray-700/50 text-gray-400 hover:bg-gray-700/50 hover:text-white"
+                    }`}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 {/* Date picker */}
                 <div>
@@ -642,7 +695,10 @@ export default function Planner() {
                   <input
                     type="time"
                     value={timeRange.start}
-                    onChange={(e) => setTimeRange(prev => ({ ...prev, start: e.target.value }))}
+                    onChange={(e) => {
+                      setTimePreset("custom");
+                      setTimeRange(prev => ({ ...prev, start: e.target.value }));
+                    }}
                     className="w-full px-3 py-2 text-sm text-white border border-gray-700 rounded-lg bg-gray-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
@@ -653,7 +709,10 @@ export default function Planner() {
                   <input
                     type="time"
                     value={timeRange.end}
-                    onChange={(e) => setTimeRange(prev => ({ ...prev, end: e.target.value }))}
+                    onChange={(e) => {
+                      setTimePreset("custom");
+                      setTimeRange(prev => ({ ...prev, end: e.target.value }));
+                    }}
                     className="w-full px-3 py-2 text-sm text-white border border-gray-700 rounded-lg bg-gray-800/50 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>

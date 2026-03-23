@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { motion } from "framer-motion";
 import { MapPin, Sparkles, ArrowRight, UserPlus, LogIn, X } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
@@ -20,6 +20,51 @@ import ServiceUnavailable from "../components/ServiceUnavailable";
 
 const GUEST_ONBOARDING_KEY = "mv_guest_onboarding_seen";
 
+const normalizeRainRisk = (weatherData) => {
+  const current = weatherData?.current || {};
+  const fromCurrent = Number(current?.rainProbability ?? current?.rain_probability);
+  const fromHourly = Number(weatherData?.hourly?.[0]?.rainProbability ?? weatherData?.hourly?.[0]?.pop);
+  const raw = Number.isFinite(fromCurrent) ? fromCurrent : fromHourly;
+  if (!Number.isFinite(raw)) return 0;
+  return raw > 1 ? raw / 100 : raw;
+};
+
+const looksGenericInsight = (text) => /routine|balanced|stable|normal|manageable|check weather|stay updated/i.test(String(text || ""));
+
+const buildProfileRequirements = (user) => {
+  const persona = String(user?.persona || "general");
+  const risks = Array.isArray(user?.weather_risks) ? user.weather_risks.join(", ") : "none";
+  return [
+    `User persona: ${persona}.`,
+    `Risk preferences: ${risks}.`,
+    "Give 2 short Hinglish lines in WhatsApp tone with clear actions.",
+    "Avoid generic statements.",
+  ].join(" ");
+};
+
+const buildCuratedHomeInsight = (weatherData, name) => {
+  const temp = Number(weatherData?.current?.temp || 0);
+  const aqi = Number(weatherData?.current?.aqi || 0);
+  const rain = normalizeRainRisk(weatherData);
+  const hour = new Date().getHours();
+  const slot = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+  const safeName = name || "friend";
+
+  if (rain >= 0.55) {
+    return `Hey ${safeName} 👋 ${slot === "evening" ? "shaam ko weather thoda change ho sakta hai" : "aaj baarish ka chance zyada hai"} 🌧️ Umbrella/raincoat saath rakho aur commute me thoda buffer rakhna 👍`;
+  }
+  if (temp >= 34 && aqi >= 130) {
+    return `Hey ${safeName} 👋 aaj heat ke saath hawa bhi heavy feel ho sakti hai 🌫️ Paani saath rakho, mask use karo aur long outdoor stay avoid karo 👍`;
+  }
+  if (temp >= 34) {
+    return `Hey ${safeName} 👋 aaj dhoop thodi strong rahegi ☀️ Bahar jao toh hydration maintain rakho aur 12-4 PM direct sun exposure avoid karo 👍`;
+  }
+  if (aqi >= 130) {
+    return `Hey ${safeName} 👋 aaj air quality thodi heavy feel ho sakti hai 🌫️ Outdoor time limit rakho aur zarurat ho to mask carry karo 👍`;
+  }
+  return `Hey ${safeName} 👋 aaj weather kaafi theek lag raha hai 🙂 Normal plans continue kar sakte ho, bas paani saath rakhna 👍`;
+};
+
 const getSafeInsightMessage = (insight) => {
   if (!insight) return "";
   if (typeof insight === "string") return insight;
@@ -39,6 +84,24 @@ const getSafeInsightMessage = (insight) => {
   return "Weather insight is being updated. Please check again shortly.";
 };
 
+const getInsightLines = (insight) => {
+  const message = getSafeInsightMessage(insight);
+  return String(message)
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+};
+
+const getInsightTips = (insight) => {
+  if (!insight || typeof insight === "string") return [];
+
+  if (Array.isArray(insight?.tips) && insight.tips.length > 0) {
+    return insight.tips.map((tip) => String(tip)).filter(Boolean).slice(0, 3);
+  }
+
+  return [];
+};
+
 export default function Home() {
   const navigate = useNavigate();
   const { location, currentLocation, savedLocation, locationSource, loading: locationLoading, error: locationError, refreshLocation } = useLocation();
@@ -51,19 +114,42 @@ export default function Home() {
   const insightInFlightRef = useRef(false);
   const lastInsightKeyRef = useRef("");
   const insightMessage = getSafeInsightMessage(insight);
+  const insightLines = getInsightLines(insight);
+  const insightTips = getInsightTips(insight);
+  const finalInsightMessage = useMemo(() => {
+    if (!isLoggedIn || !data) return insightMessage;
+    if (!insightMessage || looksGenericInsight(insightMessage)) {
+      return buildCuratedHomeInsight(data, user?.name || user?.full_name || "friend");
+    }
+    return insightMessage;
+  }, [isLoggedIn, data, insightMessage, user?.name, user?.full_name]);
+  const finalInsightLines = useMemo(() => {
+    return String(finalInsightMessage || "")
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }, [finalInsightMessage]);
   const displayLocationName =
     location?.city && location.city !== "Unknown" ? location.city : (data?.city || "Unknown");
 
   // Fetch AI quick insight
   useEffect(() => {
-    if (!data) return;
+    if (!data || !isLoggedIn) {
+      setInsight(null);
+      setInsightLoading(false);
+      return;
+    }
 
     const requestKey = [
       location?.lat,
       location?.lon,
+      user?.id || "guest",
       user?.persona || "general",
-      data?.current?.temp,
-      data?.current?.condition,
+      Math.round(Number(data?.current?.temp || 0) / 2),
+      Math.round(Number((data?.current?.rain_probability ?? data?.rain_probability) ?? 0) * 10),
+      Math.round(Number(data?.current?.aqi || 0) / 25),
+      String(data?.current?.condition || '').toLowerCase(),
+      Math.floor(new Date().getHours() / 3),
     ].join("|");
 
     if (insightInFlightRef.current || lastInsightKeyRef.current === requestKey) {
@@ -75,6 +161,7 @@ export default function Home() {
     setInsightLoading(true);
 
     const insightData = {
+      userId: user?.id || null,
       persona: user?.persona || "general",
       weatherRisks: user?.weather_risks || user?.weatherRisks || [],
       weatherData: data,
@@ -82,6 +169,7 @@ export default function Home() {
       latitude: location?.lat,
       longitude: location?.lon,
       location_name: location?.city,
+      requirements: buildProfileRequirements(user),
     };
 
     insightService
@@ -96,7 +184,7 @@ export default function Home() {
         insightInFlightRef.current = false;
         setInsightLoading(false);
       });
-  }, [data, user, location]);
+  }, [isLoggedIn, data, user?.id, user?.persona, user?.weather_risks, user?.weatherRisks, location?.lat, location?.lon, location?.city]);
 
   useEffect(() => {
     if (isLoggedIn && user && user.planner_profile_completed === false) {
@@ -263,7 +351,7 @@ export default function Home() {
       )}
 
       {/* AI Quick Insight Card */}
-      {(insight || insightLoading) && (
+      {isLoggedIn && (insight || insightLoading) && (
         <motion.div variants={fadeUp}>
           <GlassCard className="p-4 border-indigo-500/20 bg-linear-to-r from-indigo-500/8 to-purple-500/8">
             {insightLoading ? (
@@ -285,9 +373,21 @@ export default function Home() {
                   <p className="mb-1 text-xs font-semibold tracking-wider text-indigo-300 uppercase">
                     {insight.title || 'AI Insight'}
                   </p>
-                  <p className="text-sm leading-relaxed text-gray-200">
-                    {insightMessage}
-                  </p>
+                  
+                  <div className="space-y-1.5">
+                    {(finalInsightLines.length ? finalInsightLines : [finalInsightMessage]).map((line, idx) => (
+                      <p key={idx} className="text-sm leading-relaxed text-gray-200">
+                        {line}
+                      </p>
+                    ))}
+                  </div>
+                  {insightTips.length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      {insightTips.map((tip, idx) => (
+                        <p key={idx} className="text-xs leading-relaxed text-indigo-300/90">• {tip}</p>
+                      ))}
+                    </div>
+                  )}
                   {isLoggedIn && (
                     <Link
                       to="/insights"

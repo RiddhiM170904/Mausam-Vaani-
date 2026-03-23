@@ -8,15 +8,20 @@ import { formatTemperatureC, formatWindKmh, getOWMIconUrl } from "../utils/helpe
 export default function WeatherCard({ data, city }) {
   if (!data) return null;
 
-  const { temp, feelsLike, condition, description, icon, humidity, wind, aqi } = data;
-  const aqiLabel = {
-    1: "Good",
-    2: "Fair",
-    3: "Moderate",
-    4: "Poor",
-    5: "Very Poor",
-    6: "Hazardous",
+  const { temp, feelsLike, condition, description, icon, humidity, wind, aqiUs } = data;
+
+  const getAqiCondition = (value) => {
+    const aqi = Number(value);
+    if (!Number.isFinite(aqi)) return "Unknown";
+    if (aqi <= 50) return "Good";
+    if (aqi <= 100) return "Moderate";
+    if (aqi <= 150) return "Unhealthy for Sensitive";
+    if (aqi <= 200) return "Unhealthy";
+    if (aqi <= 300) return "Very Unhealthy";
+    return "Critical";
   };
+
+  const aqiText = `${aqiUs ?? "--"} ${getAqiCondition(aqiUs)}`;
 
   return (
     <GlassCard className="relative p-6 overflow-hidden sm:p-8">
@@ -64,7 +69,7 @@ export default function WeatherCard({ data, city }) {
           <span>💨 {formatWindKmh(wind)}</span>
           <span className="inline-flex items-center gap-1 text-emerald-300">
             <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.75)]"></span>
-            AQI {aqi ?? "--"}{aqi ? ` (${aqiLabel[aqi] || "Unknown"})` : ""}
+            AQI - {aqiText}
           </span>
         </div>
       </div>

@@ -25,8 +25,6 @@ const InstallPrompt = () => {
 
     // Listen for the beforeinstallprompt event (Android/desktop)
     const handleBeforeInstallPrompt = (e) => {
-      // Prevent the mini-infobar from appearing on mobile
-      e.preventDefault();
       // Save the event so it can be triggered later
       setDeferredPrompt(e);
       setSupportsPrompt(true);

@@ -10,20 +10,22 @@ import {
 } from "react-icons/wi";
 import { HiOutlineEye } from "react-icons/hi2";
 
-const aqiLabel = {
-  1: "Good",
-  2: "Fair",
-  3: "Moderate",
-  4: "Poor",
-  5: "Very Poor",
-  6: "Hazardous",
-};
-
 /**
  * Grid of weather detail metrics.
  */
 export default function WeatherDetails({ data }) {
   if (!data) return null;
+
+  const getAqiCondition = (value) => {
+    const aqi = Number(value);
+    if (!Number.isFinite(aqi)) return "Unknown";
+    if (aqi <= 50) return "Good";
+    if (aqi <= 100) return "Moderate";
+    if (aqi <= 150) return "Unhealthy for Sensitive";
+    if (aqi <= 200) return "Unhealthy";
+    if (aqi <= 300) return "Very Unhealthy";
+    return "Critical";
+  };
 
   const items = [
     {
@@ -67,21 +69,22 @@ export default function WeatherDetails({ data }) {
     });
   }
 
-  if (data.aqi) {
+  if (data.aqiUs != null || data.aqi) {
     items.splice(3, 0, {
       icon: <span className="inline-block h-3 w-3 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.75)]" />,
       label: "AQI",
-      value: `${data.aqi} (${aqiLabel[data.aqi] || "Unknown"})`,
+      value: `${data.aqiUs ?? "--"} ${getAqiCondition(data.aqiUs)}`,
     });
   }
 
+ 
   return (
     <div className="grid grid-cols-1 gap-4 px-1 sm:grid-cols-2 sm:px-0 lg:grid-cols-3 xl:grid-cols-4">
       {items.map((item) => (
-        <GlassCard key={item.label} className="p-4 flex flex-col gap-2" hover>
+        <GlassCard key={item.label} className="flex flex-col gap-2 p-4" hover>
           <div className="flex items-center gap-2">
             {item.icon}
-            <span className="text-xs text-gray-500 uppercase tracking-wider font-medium">
+            <span className="text-xs font-medium tracking-wider text-gray-500 uppercase">
               {item.label}
             </span>
           </div>

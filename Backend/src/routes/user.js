@@ -15,6 +15,9 @@ router.put('/profile', protect, [
   body('email').optional().isEmail(),
   body('persona').optional().isIn(['general', 'driver', 'student', 'worker', 'farmer', 'elderly', 'homemaker', 'business']),
   body('language').optional().isIn(['en', 'hi', 'mr', 'ta', 'te', 'bn', 'gu', 'kn', 'ml', 'pa']),
+  body('profile.vehicle').optional().isIn(['bike', 'car', 'scooter', 'truck', 'bus', 'none', 'other']),
+  body('profile.distance').optional().isFloat({ min: 0 }),
+  body('notificationToken').optional().isString(),
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -22,7 +25,7 @@ router.put('/profile', protect, [
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const allowedFields = ['name', 'email', 'persona', 'language', 'location'];
+    const allowedFields = ['name', 'email', 'persona', 'language', 'location', 'profile', 'notificationToken'];
     const updates = {};
 
     allowedFields.forEach(field => {

@@ -1,0 +1,50 @@
+[
+  {
+    "id": "aqi_unhealthy",
+    "type": "aqi",
+    "when": {
+      "aqi": { "gte": 150 }
+    },
+    "advice": "AQI above 150 is harmful for prolonged outdoor exposure. Reduce time outside and use a protective mask.",
+    "severity": "high"
+  },
+  {
+    "id": "rain_bike_risk",
+    "type": "travel",
+    "when": {
+      "rain_probability": { "gte": 0.6 },
+      "user_types": ["driver", "delivery"],
+      "vehicles": ["bike", "two_wheeler", "scooter"]
+    },
+    "advice": "Rain with two-wheeler travel increases accident risk. Carry rain gear, reduce speed, and consider delaying non-urgent trips.",
+    "severity": "high"
+  },
+  {
+    "id": "heat_dehydration",
+    "type": "temperature",
+    "when": {
+      "temp": { "gte": 34 }
+    },
+    "advice": "High temperatures increase dehydration risk. Drink water frequently and avoid peak sun hours.",
+    "severity": "medium"
+  },
+  {
+    "id": "strong_wind",
+    "type": "wind",
+    "when": {
+      "wind_speed": { "gte": 14 }
+    },
+    "advice": "Strong winds can reduce driving stability and create flying debris hazards. Secure loose items and stay alert.",
+    "severity": "medium"
+  },
+  {
+    "id": "high_humidity_worker",
+    "type": "humidity",
+    "when": {
+      "humidity": { "gte": 75 },
+      "user_types": ["worker", "farmer", "delivery"]
+    },
+    "advice": "High humidity can increase fatigue for outdoor work. Use short shaded breaks and hydrate often.",
+    "severity": "medium"
+  }
+]

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
 import GlassCard from "../components/GlassCard";
@@ -11,11 +12,19 @@ import {
   HiOutlineLanguage,
   HiOutlineUser,
 } from "react-icons/hi2";
+import {
+  ensureNotificationPermission,
+  getNotificationConfig,
+  getNotificationStatus,
+  saveNotificationConfig,
+} from "../services/localNotificationService";
 
 export default function Profile() {
   const navigate = useNavigate();
   const { user, logout, isLoggedIn } = useAuth();
   const { themeName, toggleTheme } = useTheme();
+  const [notifConfig, setNotifConfig] = useState(() => getNotificationConfig());
+  const [notifStatus, setNotifStatus] = useState(() => getNotificationStatus());
 
   if (!isLoggedIn) {
     return (
@@ -40,6 +49,31 @@ export default function Profile() {
   const handleLogout = () => {
     logout();
     navigate("/");
+  };
+
+  const refreshNotifState = () => {
+    setNotifConfig(getNotificationConfig());
+    setNotifStatus(getNotificationStatus());
+  };
+
+  const handleToggleNotifications = async () => {
+    if (notifConfig.enabled) {
+      setNotifConfig(saveNotificationConfig({ enabled: false }));
+      setNotifStatus(getNotificationStatus());
+      toast("App notifications disabled", { icon: "🔕" });
+      return;
+    }
+
+    const granted = await ensureNotificationPermission();
+    setNotifConfig(saveNotificationConfig({ enabled: granted }));
+    setNotifStatus(getNotificationStatus());
+
+    if (granted) {
+      toast.success("App notifications enabled ✅");
+    } else {
+      toast.error("Permission blocked. Enable notifications from browser settings.");
+    }
+    refreshNotifState();
   };
 
   return (
@@ -99,17 +133,35 @@ export default function Profile() {
         </GlassCard>
 
         {/* Notifications */}
-        <GlassCard className="p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <HiOutlineBell className="text-yellow-400" size={20} />
-            <div>
-              <p className="text-sm font-medium text-white">Notifications</p>
-              <p className="text-xs text-gray-500">Push & SMS alerts</p>
+        <GlassCard className="p-4 flex items-center justify-between" hover={false}>
+          <div className="flex items-start gap-3">
+            <HiOutlineBell className="text-yellow-400 mt-0.5" size={20} />
+            <div className="flex items-center gap-3">
+              <div>
+                <p className="text-sm font-medium text-white">App Notifications</p>
+                <p className="text-xs text-gray-500">
+                  {notifStatus.permission === "granted"
+                    ? "Weather and AI alerts are active"
+                    : "Enable to receive weather and AI alerts"}
+                </p>
+              </div>
             </div>
           </div>
-          <div className="w-10 h-5 rounded-full bg-indigo-500 relative">
-            <span className="absolute right-0.5 top-0.5 w-4 h-4 rounded-full bg-white" />
-          </div>
+
+          <button
+            type="button"
+            onClick={handleToggleNotifications}
+            className={`w-10 h-5 rounded-full relative transition-colors ${
+              notifConfig.enabled ? "bg-indigo-500" : "bg-gray-600"
+            }`}
+            aria-label="Toggle app notifications"
+          >
+            <span
+              className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+                notifConfig.enabled ? "translate-x-5" : "translate-x-0.5"
+              }`}
+            />
+          </button>
         </GlassCard>
       </div>
 

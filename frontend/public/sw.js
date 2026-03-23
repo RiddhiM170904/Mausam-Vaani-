@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mausam-vaani-v1';
+const CACHE_NAME = 'mausam-vaani-v2';
 const urlsToCache = [
   '/',
   '/manifest.json',
@@ -20,15 +20,41 @@ self.addEventListener('install', (event) => {
 
 // Fetch event - serve from cache when offline
 self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin) {
+    return;
+  }
+
   event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        // Return cached version or fetch from network
-        if (response) {
-          return response;
+    (async () => {
+      if (requestUrl.pathname === '/manifest.json') {
+        try {
+          const fresh = await fetch(event.request);
+          const cache = await caches.open(CACHE_NAME);
+          cache.put(event.request, fresh.clone());
+          return fresh;
+        } catch {
+          const cachedManifest = await caches.match(event.request);
+          if (cachedManifest) return cachedManifest;
+          return Response.error();
         }
-        return fetch(event.request);
-      })
+      }
+
+      const cached = await caches.match(event.request);
+      if (cached) {
+        return cached;
+      }
+
+      try {
+        return await fetch(event.request);
+      } catch {
+        return Response.error();
+      }
+    })()
   );
 });
 
@@ -95,7 +121,12 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
+  const targetUrl = event.notification?.data?.url || '/';
+
   if (event.action === 'explore') {
-    event.waitUntil(clients.openWindow('/'));
+    event.waitUntil(clients.openWindow(targetUrl));
+    return;
   }
+
+  event.waitUntil(clients.openWindow(targetUrl));
 });

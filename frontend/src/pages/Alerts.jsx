@@ -1,6 +1,9 @@
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import { useAuth } from "../context/AuthContext";
 import useLocation from "../hooks/useLocation";
 import useWeather from "../hooks/useWeather";
+import { insightService } from "../services/insightService";
 import GlassCard from "../components/GlassCard";
 import Loader from "../components/Loader";
 import {
@@ -9,16 +12,157 @@ import {
   HiInformationCircle,
 } from "react-icons/hi2";
 
+const AI_ALERT_STORAGE_KEY = "mv_ai_alert_updates_v1";
+const AI_ALERT_INTERVAL_MS = 2 * 60 * 60 * 1000;
+const AI_ALERT_TTL_MS = 12 * 60 * 60 * 1000;
+const MAX_AI_ALERTS = 3;
+
+function toAlertMessage(payload) {
+  if (!payload) return "";
+  if (typeof payload === "string") return payload;
+  if (typeof payload?.message === "string" && payload.message.trim()) return payload.message.trim();
+  if (typeof payload?.recommendation === "string" && payload.recommendation.trim()) return payload.recommendation.trim();
+  if (Array.isArray(payload?.tips) && payload.tips.length > 0) return String(payload.tips[0]);
+  return "";
+}
+
+function pruneAiAlerts(list, userId = null) {
+  const now = Date.now();
+  const safeList = Array.isArray(list) ? list : [];
+  return safeList.filter((item) => {
+    const createdAt = new Date(item?.generatedAt || 0).getTime();
+    if (!Number.isFinite(createdAt)) return false;
+    if (now - createdAt > AI_ALERT_TTL_MS) return false;
+    if (userId && item?.userId && String(item.userId) !== String(userId)) return false;
+    return true;
+  });
+}
+
+function readAiAlerts(userId = null) {
+  try {
+    const raw = localStorage.getItem(AI_ALERT_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const pruned = pruneAiAlerts(parsed, userId);
+    localStorage.setItem(AI_ALERT_STORAGE_KEY, JSON.stringify(pruned));
+    return pruned;
+  } catch {
+    return [];
+  }
+}
+
+function writeAiAlerts(list) {
+  try {
+    localStorage.setItem(AI_ALERT_STORAGE_KEY, JSON.stringify(list));
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
 /**
  * Weather alerts page — shows all active warnings.
  */
 export default function Alerts() {
+  const { isLoggedIn, user } = useAuth();
   const { location } = useLocation();
   const { data, loading } = useWeather(location?.lat, location?.lon);
+  const [aiUpdates, setAiUpdates] = useState([]);
+  const [aiUpdating, setAiUpdating] = useState(false);
+
+  const weatherData = data;
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setAiUpdates([]);
+      return;
+    }
+
+    setAiUpdates(readAiAlerts(user?.id || null).slice(0, MAX_AI_ALERTS));
+  }, [isLoggedIn, user?.id]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !weatherData) return;
+
+    let cancelled = false;
+
+    const runAiUpdate = async () => {
+      setAiUpdating(true);
+      try {
+        const result = await insightService.getQuickInsight({
+          userId: user?.id || null,
+          persona: user?.persona || "general",
+          weatherRisks: user?.weather_risks || user?.weatherRisks || [],
+          weatherData,
+          location,
+          requirements:
+            "Generate short alert-style Hinglish guidance for next 2 hours with clear do/avoid action.",
+        });
+
+        if (cancelled) return;
+
+        const message = toAlertMessage(result);
+        if (!message) return;
+
+        setAiUpdates((prev) => {
+          const current = pruneAiAlerts(prev, user?.id || null);
+          const latest = current[0];
+
+          // Avoid stacking duplicates on every cycle.
+          if (latest && String(latest.message || "").trim() === message.trim()) {
+            return current;
+          }
+
+          const next = [
+            {
+              id: `${Date.now()}`,
+              message,
+              generatedAt: new Date().toISOString(),
+              source: result?.source || "ai",
+              userId: user?.id || null,
+            },
+            ...current,
+          ].slice(0, MAX_AI_ALERTS);
+
+          writeAiAlerts(next);
+          return next;
+        });
+      } catch {
+        // Keep real-time weather alerts unaffected if AI update fails.
+      } finally {
+        if (!cancelled) setAiUpdating(false);
+      }
+    };
+
+    runAiUpdate();
+
+    const intervalId = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        runAiUpdate();
+      }
+    }, AI_ALERT_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [isLoggedIn, user?.id, user?.persona, user?.weather_risks, user?.weatherRisks, weatherData, location?.lat, location?.lon, location?.city]);
+
+  const aiAlerts = useMemo(() => aiUpdates.slice(0, MAX_AI_ALERTS), [aiUpdates]);
+  const createdAlerts = useMemo(
+    () =>
+      aiAlerts.map((item) => ({
+        event: "Notification",
+        description: item.message,
+        severity: "advisory",
+        generatedAt: item.generatedAt,
+      })),
+    [aiAlerts]
+  );
 
   if (loading) return <Loader text="Checking alerts..." />;
 
-  const alerts = data?.alerts || [];
+  const weatherAlerts = data?.alerts || [];
+  const alerts = [...weatherAlerts, ...createdAlerts];
 
   const severityConfig = {
     extreme: {
@@ -94,6 +238,11 @@ export default function Alerts() {
                       <p className="text-sm text-gray-400 leading-relaxed">
                         {alert.description}
                       </p>
+                      {alert.generatedAt && (
+                        <p className="text-xs text-gray-600 mt-2">
+                          Generated: {new Date(alert.generatedAt).toLocaleString()}
+                        </p>
+                      )}
                       {alert.start && (
                         <p className="text-xs text-gray-600 mt-2">
                           {new Date(alert.start * 1000).toLocaleString()} —{" "}

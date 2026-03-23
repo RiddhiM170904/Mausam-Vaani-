@@ -1,5 +1,6 @@
 import { BrowserRouter } from "react-router-dom";
 import { useEffect } from "react";
+import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import Navbar from "./components/Navbar";
@@ -9,6 +10,7 @@ import DynamicWeatherBackground from "./components/DynamicWeatherBackground";
 import AppErrorBoundary from "./components/AppErrorBoundary";
 import InstallPrompt from "./components/InstallPrompt";
 import OfflineIndicator from "./components/OfflineIndicator";
+import NotificationScheduler from "./components/NotificationScheduler";
 import AppRoutes from "./app/routes";
 import { registerSW } from "./utils/pwa";
 
@@ -54,6 +56,20 @@ function App() {
             
             {/* PWA Install Prompt */}
             <InstallPrompt />
+
+            {/* Local notification scheduler (frontend-only) */}
+            <NotificationScheduler />
+
+            <Toaster
+              position="top-right"
+              toastOptions={{
+                style: {
+                  background: "#111827",
+                  color: "#e5e7eb",
+                  border: "1px solid rgba(99,102,241,0.35)",
+                },
+              }}
+            />
           </div>
         </BrowserRouter>
       </ThemeProvider>
