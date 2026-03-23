@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { WifiOff, Wifi } from 'lucide-react';
+import { FiWifiOff } from 'react-icons/fi';
 
 const OfflineIndicator = () => {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -40,7 +40,7 @@ const OfflineIndicator = () => {
       showOfflineMessage ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'
     }`}>
       <div className="bg-gradient-to-r from-red-500 to-orange-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
-        <WifiOff className="w-4 h-4" />
+        <FiWifiOff className="w-4 h-4" />
         <span className="text-sm font-medium">
           You're offline. Using cached data.
         </span>
