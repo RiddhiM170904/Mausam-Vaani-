@@ -29,7 +29,333 @@ const normalizeRainRisk = (weatherData) => {
   return raw > 1 ? raw / 100 : raw;
 };
 
-const looksGenericInsight = (text) => /routine|balanced|stable|normal|manageable|check weather|stay updated/i.test(String(text || ""));
+const INSIGHT_REFRESH_INTERVAL_MS = 20 * 60 * 1000;
+const LAST_HOME_INSIGHT_KEY = "mv_home_dynamic_insight_last_v1";
+
+const formatInsightUpdatedAt = (value) => {
+  const ms = Number(value);
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+
+  return new Date(ms).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+};
+
+const looksGenericInsight = (text) =>
+  /routine|balanced|stable|normal|manageable|check weather|stay updated|overall manageable|continue karo/i.test(
+    String(text || "")
+  );
+
+const INSIGHT_ACTION_WORDS = [
+  "carry",
+  "avoid",
+  "mask",
+  "umbrella",
+  "hydration",
+  "paani",
+  "travel",
+  "buffer",
+  "cap",
+  "shade",
+  "break",
+  "slow",
+  "jaldi",
+  "plan",
+  "rakhna",
+];
+
+const INSIGHT_SITUATION_WORDS = [
+  "rain",
+  "baarish",
+  "aqi",
+  "air",
+  "hawa",
+  "heat",
+  "garmi",
+  "humidity",
+  "wind",
+  "fog",
+  "mist",
+  "dhoop",
+  "temp",
+  "temperature",
+];
+
+const INSIGHT_TIME_WORDS = [
+  "abhi",
+  "subah",
+  "shaam",
+  "raat",
+  "morning",
+  "afternoon",
+  "evening",
+  "night",
+  "12-4",
+  "time",
+  "today",
+  "aaj",
+];
+
+const USER_ACTION_BY_PERSONA = {
+  driver: "commute",
+  delivery: "delivery run",
+  farmer: "field work",
+  worker: "outdoor kaam",
+  student: "travel",
+  senior: "daily outing",
+  office: "office commute",
+  business_owner: "shop operations",
+  commuter: "travel plan",
+  general: "daily plan",
+};
+
+function includesAny(text, words) {
+  const value = String(text || "").toLowerCase();
+  return words.some((word) => value.includes(word));
+}
+
+function getInsightQualityScore(text) {
+  const value = String(text || "").trim();
+  if (!value) return 0;
+
+  let score = 0;
+  const words = value.split(/\s+/).filter(Boolean);
+
+  if (words.length >= 14) score += 0.2;
+  if (words.length >= 20) score += 0.1;
+  if (includesAny(value, INSIGHT_SITUATION_WORDS)) score += 0.3;
+  if (includesAny(value, INSIGHT_ACTION_WORDS)) score += 0.25;
+  if (includesAny(value, INSIGHT_TIME_WORDS)) score += 0.15;
+
+  if (looksGenericInsight(value)) score -= 0.3;
+  if (/weather mostly stable|normal plans continue|manageable lag raha/i.test(value)) score -= 0.2;
+
+  return Math.max(0, Math.min(1, score));
+}
+
+function shouldReplaceWithDynamicInsight(text) {
+  if (!String(text || "").trim()) return true;
+  if (looksGenericInsight(text)) return true;
+  return getInsightQualityScore(text) < 0.55;
+}
+
+function classifyPrimaryCondition(weatherData) {
+  const current = weatherData?.current || {};
+  const temp = Number(current?.temp || 0);
+  const feelsLike = Number(current?.feels_like ?? current?.feelsLike ?? temp);
+  const aqi = Number(current?.aqi || 0);
+  const humidity = Number(current?.humidity || 0);
+  const wind = Number(current?.wind || 0);
+  const condition = String(current?.condition || "").toLowerCase();
+  const rain = normalizeRainRisk(weatherData);
+
+  const rainy = rain >= 0.35 || /rain|storm|drizzle|thunder/.test(condition);
+  const polluted = aqi >= 110 || /haze|smoke|fog|mist/.test(condition);
+  const hot = Math.max(temp, feelsLike) >= 32;
+
+  if (rainy && wind >= 22) return "storm";
+  if (rainy && polluted) return "rain_pollution";
+  if (hot && polluted) return "heat_pollution";
+  if (rainy) return "rain";
+  if (hot) return "heat";
+  if (polluted) return "pollution";
+  if (wind >= 22) return "wind";
+  if (humidity >= 82) return "humidity";
+  if (Math.min(temp, feelsLike) <= 12) return "cold";
+  return "stable";
+}
+
+function getTimeContext(hour = new Date().getHours()) {
+  if (hour < 5) return { slot: "late_night", phrase: "raat me" };
+  if (hour < 10) return { slot: "morning", phrase: "subah" };
+  if (hour < 13) return { slot: "midday", phrase: "dopahar me" };
+  if (hour < 17) return { slot: "afternoon", phrase: "abhi" };
+  if (hour < 21) return { slot: "evening", phrase: "shaam me" };
+  return { slot: "night", phrase: "raat me" };
+}
+
+function getTempLevel(tempLike) {
+  if (tempLike >= 40) return "kaafi tez garmi";
+  if (tempLike >= 35) return "strong heat";
+  if (tempLike >= 31) return "thodi garmi";
+  if (tempLike <= 12) return "thandi conditions";
+  return "mild weather";
+}
+
+function getActionItem(condition) {
+  const map = {
+    heat: "paani + cap",
+    rain: "umbrella/raincoat",
+    pollution: "mask",
+    heat_pollution: "paani + mask",
+    rain_pollution: "umbrella + mask",
+    storm: "rain gear + safer route",
+    cold: "light jacket",
+    wind: "safe speed",
+    humidity: "hydration",
+    stable: "basic hydration",
+  };
+  return map[condition] || "basic hydration";
+}
+
+function chooseVariant(options, seed) {
+  if (!Array.isArray(options) || !options.length) return "";
+  return options[Math.abs(seed) % options.length];
+}
+
+function buildLineTemplatesByCondition(condition) {
+  const templates = {
+    heat: [
+      "abhi heat thodi kam ho rahi hai lekin din bhar ki garmi feel hogi.",
+      "abhi dhoop kaafi strong hai.",
+      "garmi zyada hai aur thakan jaldi ho sakti hai.",
+    ],
+    rain: [
+      "shaam tak baarish aa sakti hai.",
+      "rain chance high lag raha hai.",
+      "road slippery ho sakti hai.",
+    ],
+    pollution: [
+      "aaj hawa thodi heavy lag rahi hai.",
+      "AQI high side pe hai.",
+      "air quality perfect nahi hai.",
+    ],
+    heat_pollution: [
+      "garmi ke saath hawa bhi heavy lag rahi hai.",
+      "heat aur AQI dono elevated hain.",
+      "body load zyada ho sakta hai.",
+    ],
+    rain_pollution: [
+      "baarish ke saath hawa bhi heavy ho sakti hai.",
+      "mixed weather conditions aa sakti hain.",
+      "weather quick change ho sakta hai.",
+    ],
+    storm: [
+      "rain aur hawa dono strong ho sakte hain.",
+      "weather jaldi badal sakta hai.",
+      "open area me extra care rakho.",
+    ],
+    cold: [
+      "subah thodi thand aur halki fog ho sakti hai.",
+      "cold weather me body slow feel kar sakti hai.",
+      "raat me thand zyada lag sakti hai.",
+    ],
+    wind: [
+      "Aaj hawa tez ho sakti hai. {user_action} me pace slow rakho.",
+      "Open road par gust aa sakte hain. Speed control me rakho.",
+      "Windy weather me dhyan se travel karo.",
+    ],
+    humidity: [
+      "Aaj humidity zyada hai. Paani pe dhyan rakho.",
+      "Chipchipi garmi me thakan jaldi ho sakti hai. Break lete raho.",
+      "Weather sticky lag sakta hai. Light kapde pehno.",
+    ],
+    stable: [
+      "abhi travel ke liye time better hai.",
+      "subah weather kaafi manageable hai.",
+      "aaj weather theek hai aur plans smooth rahenge.",
+    ],
+  };
+
+  return templates[condition] || templates.stable;
+}
+
+function buildPersonaTail(persona) {
+  const tone = {
+    driver: [
+      "Drive smooth rakho aur sudden brake avoid karo.",
+      "Road dekhkar safe speed me chalo.",
+    ],
+    delivery: [
+      "Route simple rakho taki delay kam ho.",
+      "Delivery ke beech paani peete raho.",
+    ],
+    student: [
+      "Travel se pehle essentials ready rakho.",
+      "Travel ke liye thoda jaldi niklo.",
+    ],
+    worker: [
+      "Outdoor kaam me beech-beech me break lo.",
+      "Kaam ka pace halka rakho.",
+    ],
+    senior: [
+      "Aaj comfort ko priority do.",
+      "Bahar kam time ke liye niklo.",
+    ],
+    farmer: [
+      "Field ka kaam mausam dekhkar karo.",
+      "Khuli jagah ka kaam chhote slots me rakho.",
+    ],
+    business_owner: [
+      "Aaj customer flow weather se change ho sakta hai.",
+      "Shop prep pehle se ready rakho.",
+    ],
+  };
+
+  return tone[persona] || [
+    "Aaj ka plan simple rakho.",
+    "Weather change ho to plan adjust kar lena.",
+  ];
+}
+
+function buildTimeTail(timeSlot) {
+  const timeTails = {
+    morning: [
+      "Subah ka time kaam ke liye achha hai.",
+      "Important kaam subah kar lo.",
+    ],
+    midday: [
+      "Dopahar me bahar kam time raho.",
+      "Is time me break lete raho.",
+    ],
+    afternoon: [
+      "Afternoon me pace halka rakho.",
+      "Travel time pe dhyan rakho.",
+    ],
+    evening: [
+      "Shaam me weather better ho sakta hai.",
+      "Nikalne se pehle ek quick check kar lo.",
+    ],
+    night: [
+      "Raat me safe travel pe dhyan rakho.",
+      "Light activity best rahegi.",
+    ],
+    late_night: [
+      "Late night me unnecessary travel avoid karo.",
+      "Safe rehkar hi niklo.",
+    ],
+  };
+
+  return timeTails[timeSlot] || timeTails.afternoon;
+}
+
+function simplifyFallbackLanguage(text) {
+  return String(text || "")
+    .replace(/\bwindow\b/gi, "time")
+    .replace(/\bbuffer\b/gi, "extra time")
+    .replace(/major risk trigger/gi, "weather issue")
+    .replace(/rush\s*window/gi, "bheed wala time")
+    .replace(/comparetively/gi, "comparatively")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function avoidImmediateRepeat(nextText) {
+  const message = String(nextText || "").trim();
+  if (!message) return message;
+
+  try {
+    const previous = localStorage.getItem(LAST_HOME_INSIGHT_KEY) || "";
+    if (previous && previous === message) return message;
+    localStorage.setItem(LAST_HOME_INSIGHT_KEY, message);
+  } catch {
+    // ignore localStorage failures for repeat guard.
+  }
+
+  return message;
+}
 
 const buildProfileRequirements = (user) => {
   const persona = String(user?.persona || "general");
@@ -42,27 +368,66 @@ const buildProfileRequirements = (user) => {
   ].join(" ");
 };
 
-const buildCuratedHomeInsight = (weatherData, name) => {
+const buildCuratedHomeInsight = (weatherData, user = {}) => {
+  const name = user?.name || user?.full_name || "friend";
+  const persona = String(user?.persona || "general").toLowerCase();
   const temp = Number(weatherData?.current?.temp || 0);
+  const feelsLike = Number(weatherData?.current?.feels_like ?? weatherData?.current?.feelsLike ?? temp);
   const aqi = Number(weatherData?.current?.aqi || 0);
+  const humidity = Number(weatherData?.current?.humidity || 0);
+  const wind = Number(weatherData?.current?.wind || 0);
   const rain = normalizeRainRisk(weatherData);
-  const hour = new Date().getHours();
-  const slot = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
-  const safeName = name || "friend";
 
-  if (rain >= 0.55) {
-    return `Hey ${safeName} 👋 ${slot === "evening" ? "shaam ko weather thoda change ho sakta hai" : "aaj baarish ka chance zyada hai"} 🌧️ Umbrella/raincoat saath rakho aur commute me thoda buffer rakhna 👍`;
-  }
-  if (temp >= 34 && aqi >= 130) {
-    return `Hey ${safeName} 👋 aaj heat ke saath hawa bhi heavy feel ho sakti hai 🌫️ Paani saath rakho, mask use karo aur long outdoor stay avoid karo 👍`;
-  }
-  if (temp >= 34) {
-    return `Hey ${safeName} 👋 aaj dhoop thodi strong rahegi ☀️ Bahar jao toh hydration maintain rakho aur 12-4 PM direct sun exposure avoid karo 👍`;
-  }
-  if (aqi >= 130) {
-    return `Hey ${safeName} 👋 aaj air quality thodi heavy feel ho sakti hai 🌫️ Outdoor time limit rakho aur zarurat ho to mask carry karo 👍`;
-  }
-  return `Hey ${safeName} 👋 aaj weather kaafi theek lag raha hai 🙂 Normal plans continue kar sakte ho, bas paani saath rakhna 👍`;
+  const thermalStress = Math.max(temp, feelsLike);
+  const primaryCondition = classifyPrimaryCondition(weatherData);
+  const timeContext = getTimeContext();
+  const tempLevel = getTempLevel(thermalStress);
+  const userAction = USER_ACTION_BY_PERSONA[persona] || USER_ACTION_BY_PERSONA.general;
+  const actionItem = getActionItem(primaryCondition);
+
+  const lineTemplates = buildLineTemplatesByCondition(primaryCondition);
+  const personaTails = buildPersonaTail(persona);
+  const timeTails = buildTimeTail(timeContext.slot);
+
+  const seedBase =
+    Math.round(thermalStress) +
+    Math.round(rain * 100) +
+    Math.round(aqi / 5) +
+    Math.round(wind) +
+    Math.round(humidity / 2) +
+    new Date().getHours() +
+    Math.floor(new Date().getMinutes() / 20);
+
+  const opener = `Hey ${name} 👋`;
+
+  const line1Template = chooseVariant(lineTemplates, seedBase + 3);
+  const line2Template = chooseVariant(personaTails, seedBase + 7);
+  const line3Template = chooseVariant(timeTails, seedBase + 11);
+
+  const line1 = String(line1Template)
+    .replace(/\{time_phrase\}/g, timeContext.phrase)
+    .replace(/\{temp_level\}/g, tempLevel)
+    .replace(/\{action_item\}/g, actionItem)
+    .replace(/\{user_action\}/g, userAction)
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const actionLine =
+    primaryCondition === "rain" || primaryCondition === "rain_pollution" || primaryCondition === "storm"
+      ? "Bahar nikalte time umbrella le jaana aur travel me thoda extra time rakhna."
+      : primaryCondition === "heat" || primaryCondition === "heat_pollution"
+        ? "Agar bahar ja rahe ho toh paani saath rakho aur direct dhoop avoid karo."
+        : primaryCondition === "pollution"
+          ? "Bahar jao toh mask use karo aur hydration maintain rakhna."
+          : primaryCondition === "cold"
+            ? "Bahar jao toh warm kapde pehenna aur thoda extra time rakhna."
+            : "Bas paani saath rakho aur zarurat ho toh weather ek baar check kar lena.";
+
+  const dynamicMessage = `${opener} ${line1} ${actionLine} ${line2Template}`
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return avoidImmediateRepeat(simplifyFallbackLanguage(dynamicMessage));
 };
 
 const getSafeInsightMessage = (insight) => {
@@ -111,18 +476,21 @@ export default function Home() {
   const [insightLoading, setInsightLoading] = useState(false);
   const [showLocationSelector, setShowLocationSelector] = useState(false);
   const [showGuestOnboarding, setShowGuestOnboarding] = useState(false);
+  const [insightTick, setInsightTick] = useState(0);
   const insightInFlightRef = useRef(false);
   const lastInsightKeyRef = useRef("");
   const insightMessage = getSafeInsightMessage(insight);
+  const insightSource = String(insight?.source || "").toLowerCase();
   const insightLines = getInsightLines(insight);
   const insightTips = getInsightTips(insight);
   const finalInsightMessage = useMemo(() => {
     if (!isLoggedIn || !data) return insightMessage;
-    if (!insightMessage || looksGenericInsight(insightMessage)) {
-      return buildCuratedHomeInsight(data, user?.name || user?.full_name || "friend");
+    const shouldForceTemplate = insightSource.startsWith("fallback");
+    if (shouldForceTemplate || shouldReplaceWithDynamicInsight(insightMessage)) {
+      return buildCuratedHomeInsight(data, user || {});
     }
     return insightMessage;
-  }, [isLoggedIn, data, insightMessage, user?.name, user?.full_name]);
+  }, [isLoggedIn, data, insightMessage, insightSource, user]);
   const finalInsightLines = useMemo(() => {
     return String(finalInsightMessage || "")
       .split(/\n+/)
@@ -131,6 +499,23 @@ export default function Home() {
   }, [finalInsightMessage]);
   const displayLocationName =
     location?.city && location.city !== "Unknown" ? location.city : (data?.city || "Unknown");
+  const insightUpdatedAtLabel = useMemo(() => {
+    const fromInsight = formatInsightUpdatedAt(insight?.generatedAt);
+    if (fromInsight) return fromInsight;
+    if (data?.lastUpdated) {
+      const parsed = Date.parse(data.lastUpdated);
+      return formatInsightUpdatedAt(parsed);
+    }
+    return null;
+  }, [insight?.generatedAt, data?.lastUpdated]);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setInsightTick((prev) => prev + 1);
+    }, INSIGHT_REFRESH_INTERVAL_MS);
+
+    return () => clearInterval(intervalId);
+  }, []);
 
   // Fetch AI quick insight
   useEffect(() => {
@@ -147,9 +532,12 @@ export default function Home() {
       user?.persona || "general",
       Math.round(Number(data?.current?.temp || 0) / 2),
       Math.round(Number((data?.current?.rain_probability ?? data?.rain_probability) ?? 0) * 10),
+      Math.round(Number(data?.current?.humidity || 0) / 5),
+      Math.round(Number(data?.current?.wind || 0) / 2),
       Math.round(Number(data?.current?.aqi || 0) / 25),
       String(data?.current?.condition || '').toLowerCase(),
-      Math.floor(new Date().getHours() / 3),
+      `${new Date().getHours()}-${Math.floor(new Date().getMinutes() / 20)}`,
+      insightTick,
     ].join("|");
 
     if (insightInFlightRef.current || lastInsightKeyRef.current === requestKey) {
@@ -184,7 +572,7 @@ export default function Home() {
         insightInFlightRef.current = false;
         setInsightLoading(false);
       });
-  }, [isLoggedIn, data, user?.id, user?.persona, user?.weather_risks, user?.weatherRisks, location?.lat, location?.lon, location?.city]);
+  }, [isLoggedIn, data, user?.id, user?.persona, user?.weather_risks, user?.weatherRisks, location?.lat, location?.lon, location?.city, insightTick]);
 
   useEffect(() => {
     if (isLoggedIn && user && user.planner_profile_completed === false) {
@@ -373,6 +761,9 @@ export default function Home() {
                   <p className="mb-1 text-xs font-semibold tracking-wider text-indigo-300 uppercase">
                     {insight.title || 'AI Insight'}
                   </p>
+                  {insightUpdatedAtLabel && (
+                    <p className="mb-1 text-[11px] text-gray-400">Updated at {insightUpdatedAtLabel}</p>
+                  )}
                   
                   <div className="space-y-1.5">
                     {(finalInsightLines.length ? finalInsightLines : [finalInsightMessage]).map((line, idx) => (

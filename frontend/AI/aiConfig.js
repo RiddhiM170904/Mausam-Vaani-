@@ -3,6 +3,8 @@ export const AI_CONFIG = {
   openWeatherKey: import.meta.env.VITE_OWM_KEY || '',
   geminiApiKey: import.meta.env.VITE_GEMINI_API_KEY || '',
   geminiModel: import.meta.env.VITE_GEMINI_MODEL || 'gemini-1.5-flash',
+  groqApiKey: import.meta.env.VITE_GROQ_API_KEY || '',
+  groqModel: import.meta.env.VITE_GROQ_MODEL || 'llama-3.1-8b-instant',
   llmProvider: (import.meta.env.VITE_LLM_PROVIDER || 'gemini').toLowerCase(),
   weatherTtlMs: 10 * 60 * 1000,
   insightTtlMs: 5 * 60 * 1000,
@@ -10,3 +12,4 @@ export const AI_CONFIG = {
 
 export const hasWeatherKey = () => Boolean(AI_CONFIG.openWeatherKey);
 export const hasGeminiKey = () => Boolean(AI_CONFIG.geminiApiKey);
+export const hasGroqKey = () => Boolean(AI_CONFIG.groqApiKey);

@@ -89,14 +89,25 @@ function doBackgroundSync() {
 
 // Push notification handling
 self.addEventListener('push', (event) => {
+  let payload = {};
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch {
+      payload = { body: event.data.text() };
+    }
+  }
+
+  const title = payload?.title || 'Mausam Vaani';
   const options = {
-    body: event.data ? event.data.text() : 'New weather update available!',
+    body: payload?.body || 'New weather update available!',
     icon: '/icons/icon-192x192.png',
     badge: '/icons/icon-72x72.png',
     vibrate: [100, 50, 100],
     data: {
       dateOfArrival: Date.now(),
-      primaryKey: '2'
+      primaryKey: '2',
+      ...(payload?.data || {}),
     },
     actions: [
       {
@@ -113,7 +124,7 @@ self.addEventListener('push', (event) => {
   };
 
   event.waitUntil(
-    self.registration.showNotification('Mausam Vaani', options)
+    self.registration.showNotification(title, options)
   );
 });
 

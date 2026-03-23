@@ -18,6 +18,11 @@ import {
   getNotificationStatus,
   saveNotificationConfig,
 } from "../services/localNotificationService";
+import {
+  registerPushSubscription,
+  saveBackendNotificationPreference,
+  unregisterPushSubscription,
+} from "../services/notificationBackendService";
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -58,6 +63,18 @@ export default function Profile() {
 
   const handleToggleNotifications = async () => {
     if (notifConfig.enabled) {
+      try {
+        await unregisterPushSubscription();
+        await saveBackendNotificationPreference({
+          userId: user?.id,
+          enabled: false,
+          dailyCount: notifConfig.dailyCount,
+          timezone: notifConfig.timezone,
+        });
+      } catch (err) {
+        toast.error(err?.message || "Failed to disable backend notifications");
+      }
+
       setNotifConfig(saveNotificationConfig({ enabled: false }));
       setNotifStatus(getNotificationStatus());
       toast("App notifications disabled", { icon: "🔕" });
@@ -65,14 +82,37 @@ export default function Profile() {
     }
 
     const granted = await ensureNotificationPermission();
-    setNotifConfig(saveNotificationConfig({ enabled: granted }));
-    setNotifStatus(getNotificationStatus());
 
-    if (granted) {
-      toast.success("App notifications enabled ✅");
-    } else {
+    if (!granted) {
+      setNotifConfig(saveNotificationConfig({ enabled: false }));
+      setNotifStatus(getNotificationStatus());
       toast.error("Permission blocked. Enable notifications from browser settings.");
+      refreshNotifState();
+      return;
     }
+
+    try {
+      const subscriptionResult = await registerPushSubscription({ userId: user?.id });
+      if (!subscriptionResult.ok) {
+        throw new Error("Push subscription was not granted");
+      }
+
+      await saveBackendNotificationPreference({
+        userId: user?.id,
+        enabled: true,
+        dailyCount: notifConfig.dailyCount,
+        timezone: notifConfig.timezone,
+      });
+
+      setNotifConfig(saveNotificationConfig({ enabled: true }));
+      setNotifStatus(getNotificationStatus());
+      toast.success("App notifications enabled ✅");
+    } catch (err) {
+      setNotifConfig(saveNotificationConfig({ enabled: false }));
+      setNotifStatus(getNotificationStatus());
+      toast.error(err?.message || "Failed to enable backend notifications");
+    }
+
     refreshNotifState();
   };
 

@@ -57,6 +57,25 @@ Response:
 
 Evaluates trigger rules without calling the LLM.
 
+## Merged Notification Backend
+
+Notification-Backend features are now merged into this same `Backend` service.
+
+### Notification APIs
+
+1. `POST /api/subscriptions`
+2. `DELETE /api/subscriptions`
+3. `POST /api/preferences`
+4. `POST /api/notifications/test`
+5. `POST /api/notifications/run-now`
+6. `GET /api/notifications/status`
+
+### Scheduler
+
+- In-process scheduler runs every 5 minutes (configurable via `NOTIFICATION_CRON`).
+- Scheduler auto-starts on server boot only when notification env vars are configured.
+- If notification env vars are missing, main backend still runs and notification APIs return `503`.
+
 ## Environment Variables
 
 Create a `.env` in `Backend`:
@@ -81,6 +100,15 @@ GEMINI_MODEL=gemini-1.5-flash
 # OpenAI
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
+
+# Notification service (Supabase + Web Push)
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+VAPID_SUBJECT=mailto:you@example.com
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+NOTIFICATION_TIMEZONE=Asia/Kolkata
+NOTIFICATION_CRON=*/5 * * * *
 ```
 
 ## Run
@@ -99,3 +127,10 @@ npm run dev
 - `src/services/llmService.js`: LLM provider integration + fallback
 - `src/services/notificationService.js`: Event trigger engine
 - `src/data/rag_rules.json`: Knowledge rules
+
+### Merged Notification Files
+
+- `src/notifications/*`: scheduler, push, subscription services and config
+- `src/routes/notificationSubscriptions.js`: subscription + preference APIs
+- `src/routes/notificationJobs.js`: test push + run-now APIs
+- `sql/notification_schema.sql`: required Supabase notification tables

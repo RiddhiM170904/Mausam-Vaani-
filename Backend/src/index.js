@@ -12,6 +12,9 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
 const weatherRoutes = require('./routes/weather');
 const aiRoutes = require('./routes/aiRoutes');
+const notificationSubscriptionsRoutes = require('./routes/notificationSubscriptions');
+const notificationJobsRoutes = require('./routes/notificationJobs');
+const { startScheduler } = require('./notifications/schedulerService');
 
 
 const app = express();
@@ -89,7 +92,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/weather', weatherRoutes);
 app.use('/api/ai', aiRoutes);
-app.use('/api/ai', aiRoutes);
+app.use('/api', notificationSubscriptionsRoutes);
+app.use('/api', notificationJobsRoutes);
 
 // ===========================================
 // SERVE FRONTEND IN PRODUCTION
@@ -136,6 +140,9 @@ app.listen(PORT, () => {
   console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
   console.log('='.repeat(50));
+
+  // Start merged notification scheduler when notification env is configured.
+  startScheduler();
 });
 
 module.exports = app;

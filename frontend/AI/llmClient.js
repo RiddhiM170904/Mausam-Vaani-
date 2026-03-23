@@ -1,4 +1,4 @@
-import { AI_CONFIG, hasGeminiKey } from './aiConfig.js';
+import { AI_CONFIG, hasGeminiKey, hasGroqKey } from './aiConfig.js';
 
 const insightCache = new Map();
 const GEMINI_LAST_MODEL_KEY = 'mv_gemini_last_model';
@@ -186,7 +186,21 @@ function seemsActionable(text) {
 }
 
 function isGeneric(text) {
-  return /routine|check weather|stay updated|normal rakh sakte ho/i.test(String(text || ''));
+  return /routine continue|check weather later|stay updated/i.test(String(text || ''));
+}
+
+function validateInsightText(text) {
+  const cleaned = String(text || '').trim();
+  const state = {
+    incomplete: looksIncomplete(cleaned),
+    actionable: seemsActionable(cleaned),
+    generic: isGeneric(cleaned),
+  };
+
+  return {
+    ...state,
+    ok: !state.incomplete && state.actionable && !state.generic,
+  };
 }
 
 function buildCacheKey(context, ragContext) {
@@ -441,6 +455,64 @@ async function callGemini(prompt) {
   throw lastError || new Error('Gemini request failed for all models');
 }
 
+async function callGroq(prompt) {
+  const modelName = AI_CONFIG.groqModel || 'llama-3.1-8b-instant';
+
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${AI_CONFIG.groqApiKey}`,
+    },
+    body: JSON.stringify({
+      model: modelName,
+      temperature: 0.35,
+      max_tokens: 260,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a practical weather assistant for Indian users. Write short, clear Hinglish guidance with actions.',
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '');
+    throw new Error(`Groq request failed: ${response.status} ${errorText}`);
+  }
+
+  const data = await response.json();
+  const text = data?.choices?.[0]?.message?.content?.trim() || '';
+  return { text, modelName };
+}
+
+function buildRepairPrompt(text, context) {
+  const userType = String(context?.user_profile?.user_type || 'general');
+  const weather = context?.weather || {};
+  const timeSlot = String(context?.time_slot || getTimeSlotFromHour(context?.local_hour));
+
+  return [
+    'Rewrite the insight in simple Hinglish.',
+    'Rules: exactly 2 short lines, no jargon, no generic words.',
+    'Must follow: Situation -> Impact -> Action.',
+    'Must include user type relevance and one clear action.',
+    'No phrases like "check weather later" or "routine continue".',
+    '',
+    `User type: ${userType}`,
+    `Time slot: ${timeSlot}`,
+    `Weather: temp=${Number(weather?.temp || 0)}, rain=${Number(weather?.rain_probability || 0)}, aqi=${Number(weather?.aqi || 0)}`,
+    `Current text: ${String(text || '').trim()}`,
+    '',
+    'Output only rewritten final text.',
+  ].join('\n');
+}
+
 export async function generateInsight(context, ragContext) {
   const key = buildCacheKey(context, ragContext);
   const cached = insightCache.get(key);
@@ -452,6 +524,35 @@ export async function generateInsight(context, ragContext) {
   const prompt = isPlannerIntent
     ? buildPlannerPrompt(context, ragContext)
     : buildPersonalizedPrompt(context, ragContext);
+
+  if (AI_CONFIG.llmProvider === 'groq' && hasGroqKey()) {
+    try {
+      const result = await callGroq(prompt);
+      let text = sanitizeInsightOutput(result?.text || '');
+      let validation = validateInsightText(text);
+
+      if (!validation.ok) {
+        const repaired = await callGroq(buildRepairPrompt(text, context));
+        const repairedText = sanitizeInsightOutput(repaired?.text || '');
+        const repairedValidation = validateInsightText(repairedText);
+        if (repairedValidation.ok) {
+          text = repairedText;
+          validation = repairedValidation;
+        }
+      }
+
+      const value = validation.ok ? text : fallbackInsight(context, ragContext);
+      insightCache.set(key, { ts: Date.now(), value });
+      return {
+        text: value,
+        source: validation.ok ? `groq:${result.modelName}` : 'fallback:validation',
+      };
+    } catch {
+      const value = fallbackInsight(context, ragContext);
+      insightCache.set(key, { ts: Date.now(), value });
+      return { text: value, source: 'fallback:groq_error' };
+    }
+  }
 
   if (AI_CONFIG.llmProvider === 'gemini' && hasGeminiKey()) {
     try {

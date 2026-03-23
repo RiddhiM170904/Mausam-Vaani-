@@ -57,7 +57,7 @@ function App() {
             {/* PWA Install Prompt */}
             <InstallPrompt />
 
-            {/* Local notification scheduler (frontend-only) */}
+            {/* Notification backend sync helper */}
             <NotificationScheduler />
 
             <Toaster

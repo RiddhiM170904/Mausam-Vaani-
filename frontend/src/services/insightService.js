@@ -1,8 +1,9 @@
 import { getPersonalizedInsight } from "../../AI/index.js";
 
-const INSIGHT_CACHE_PREFIX = "mv_ai_quick_insight_v5";
+const INSIGHT_CACHE_PREFIX = "mv_ai_quick_insight_v7";
 const INSIGHT_LAST_ACTIVE_KEY = "mv_ai_last_active_at";
-const INSIGHT_INACTIVITY_MS = 60 * 60 * 1000;
+const INSIGHT_INACTIVITY_MS = 20 * 60 * 1000;
+const QUICK_INSIGHT_MAX_CACHE_MS = 20 * 60 * 1000;
 const AI_INSIGHT_DEBUG_PREFIX = "[AIInsightDebug]";
 const MAX_INSIGHT_WORDS = 55;
 
@@ -39,15 +40,25 @@ function buildSessionInsightKey(data = {}) {
     .slice(0, 80)
     .replace(/\s+/g, " ");
   const temp = Number(data?.weatherData?.current?.temp);
+  const feelsLike = Number(data?.weatherData?.current?.feels_like ?? data?.weatherData?.current?.feelsLike);
   const rain = Number(data?.weatherData?.current?.rain_probability ?? data?.weatherData?.rain_probability);
+  const humidity = Number(data?.weatherData?.current?.humidity);
+  const wind = Number(data?.weatherData?.current?.wind);
+  const condition = String(data?.weatherData?.current?.condition || '').toLowerCase();
   const tempBucket = Number.isFinite(temp) ? Math.round(temp / 2) : "na";
+  const feelsBucket = Number.isFinite(feelsLike) ? Math.round(feelsLike / 2) : "na";
   const rainBucket = Number.isFinite(rain) ? Math.round(rain * 10) : "na";
+  const humidityBucket = Number.isFinite(humidity) ? Math.round(humidity / 10) : "na";
+  const windBucket = Number.isFinite(wind) ? Math.round(wind / 3) : "na";
   const latKey = Number.isFinite(lat) ? lat.toFixed(2) : "na";
   const lonKey = Number.isFinite(lon) ? lon.toFixed(2) : "na";
   const now = new Date();
+  const llmProvider = String(import.meta.env.VITE_LLM_PROVIDER || "gemini").toLowerCase();
+  const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const monthKey = now.toLocaleString('en-IN', { month: 'short' }).toLowerCase();
-  const timeWindowKey = Math.floor(now.getHours() / 4);
-  return `${INSIGHT_CACHE_PREFIX}:${userId}:${persona}:${latKey}:${lonKey}:${monthKey}:w${timeWindowKey}:t${tempBucket}:r${rainBucket}:${requirementsKey}`;
+  const timeWindowKey = `${now.getHours()}-${Math.floor(now.getMinutes() / 20)}`;
+  const conditionKey = condition.replace(/\s+/g, '_').slice(0, 24) || 'na';
+  return `${INSIGHT_CACHE_PREFIX}:${llmProvider}:${userId}:${persona}:${latKey}:${lonKey}:${dayKey}:${monthKey}:w${timeWindowKey}:t${tempBucket}:f${feelsBucket}:r${rainBucket}:h${humidityBucket}:wd${windBucket}:c${conditionKey}:${requirementsKey}`;
 }
 
 function updateLastActive() {
@@ -260,7 +271,15 @@ export const insightService = {
     const cacheKey = buildSessionInsightKey(data);
     const cached = readCache(cacheKey);
     const cachedMessage = cached?.value?.message;
-    const canUseCached = cached && isSessionActive() && !isIncompleteMessage(cachedMessage);
+    const cachedSource = String(cached?.value?.source || cached?.value?.llm_source || "").toLowerCase();
+    const isTrustedLlmSource = cachedSource.startsWith("groq:") || cachedSource.startsWith("gemini:");
+    const cacheAge = nowMs() - Number(cached?.savedAt || 0);
+    const canUseCached =
+      cached &&
+      isTrustedLlmSource &&
+      cacheAge <= QUICK_INSIGHT_MAX_CACHE_MS &&
+      isSessionActive() &&
+      !isIncompleteMessage(cachedMessage);
 
     if (canUseCached) {
       if (cached?.value && typeof cached.value === "object") {
@@ -271,6 +290,7 @@ export const insightService = {
             .filter(Boolean)
             .slice(0, 5);
         }
+        cached.value.generatedAt = cached.value.generatedAt || cached?.savedAt || nowMs();
       }
       console.info(`${AI_INSIGHT_DEBUG_PREFIX} cache hit`, {
         cacheKey,
@@ -329,6 +349,7 @@ export const insightService = {
         tips: buildActionableTips(aiResult?.data),
         source: aiResult?.data?.llm_source || "fallback",
         ai: aiResult?.data || null,
+        generatedAt: nowMs(),
       };
 
       writeCache(cacheKey, {
@@ -540,7 +561,8 @@ export const insightService = {
       title: title,
       message: enforceInsightWordRange(primaryMessage),
       tips: insights,
-      source: 'local'
+      source: 'local',
+      generatedAt: nowMs(),
     };
   },
 
