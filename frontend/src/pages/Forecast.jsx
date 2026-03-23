@@ -4,6 +4,7 @@ import useLocation from "../hooks/useLocation";
 import useWeather from "../hooks/useWeather";
 import Loader from "../components/Loader";
 import GlassCard from "../components/GlassCard";
+import AINowcast from "../components/AINowcast";
 import {
   getOWMIconUrl,
   formatDay,
@@ -14,6 +15,7 @@ import {
   formatVisibilityKm,
 } from "../utils/helpers";
 import {
+  
   AreaChart,
   Area,
   XAxis,
@@ -99,6 +101,12 @@ export default function Forecast() {
           ))}
         </div>
       </GlassCard>
+
+      <AINowcast 
+        lat={location?.lat} 
+        lon={location?.lon} 
+        weatherData={data} 
+      />
 
       {/* Chart */}
       <GlassCard className="p-4 sm:p-6" hover={false}>

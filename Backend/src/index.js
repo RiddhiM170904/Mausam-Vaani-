@@ -11,8 +11,8 @@ require('dotenv').config();
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/user');
 const weatherRoutes = require('./routes/weather');
-const aiRoutes = require('./routes/ai');
-const intelligenceRoutes = require('./routes/intelligence');
+const aiRoutes = require('./routes/aiRoutes');
+
 
 const app = express();
 
@@ -60,14 +60,16 @@ app.use('/api', limiter);
 // DATABASE CONNECTION
 // ===========================================
 
-mongoose.connect(process.env.MONGODB_URI)
-  .then(() => {
-    console.log('✅ MongoDB connected successfully');
-  })
-  .catch((err) => {
-    console.error('❌ MongoDB connection error:', err.message);
-    process.exit(1);
-  });
+// mongoose.connect(process.env.MONGODB_URI)
+//   .then(() => {
+//     console.log('✅ MongoDB connected successfully');
+//   })
+//   .catch((err) => {
+//     console.error('❌ MongoDB connection error:', err.message);
+//     process.exit(1);
+//   });
+
+console.log("⚠️ MongoDB disabled for now");
 
 // ===========================================
 // ROUTES
@@ -87,7 +89,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/user', userRoutes);
 app.use('/api/weather', weatherRoutes);
 app.use('/api/ai', aiRoutes);
-app.use('/api/intelligence', intelligenceRoutes);
+app.use('/api/ai', aiRoutes);
 
 // ===========================================
 // SERVE FRONTEND IN PRODUCTION
