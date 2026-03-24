@@ -33,11 +33,23 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:3000',
-  process.env.FRONTEND_URL
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_URL_2
 ].filter(Boolean);
 
+const isVercelOrigin = (origin) => /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin);
+
 app.use(cors({
-  origin: allowedOrigins,
+  origin(origin, callback) {
+    // Allow non-browser requests (no Origin header) such as server-to-server health checks.
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin) || isVercelOrigin(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
