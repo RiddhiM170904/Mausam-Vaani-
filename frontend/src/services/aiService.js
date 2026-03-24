@@ -2,7 +2,11 @@
 // Mausam Vaani — AI Service
 // Three functions to call the AI backend routes
 
-const BASE_URL = "http://localhost:5000";
+const BASE_URL = (
+  import.meta.env.VITE_BACKEND_URL ||
+  import.meta.env.VITE_NOTIFICATION_BACKEND_URL ||
+  "http://localhost:5000"
+).replace(/\/+$/, "");
 
 // ── 1. Get AI prediction (hyperlocal + nowcast + crowd) ──
 export async function getAIPrediction(weatherData, lat, lon) {
