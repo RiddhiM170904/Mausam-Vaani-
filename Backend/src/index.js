@@ -80,6 +80,14 @@ console.log("⚠️ MongoDB disabled for now");
 // ===========================================
 
 // Health check
+app.get('/', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Mausam Vaani backend is running',
+    health: '/api/health',
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
@@ -146,17 +154,19 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log('='.repeat(50));
-  console.log('🌤️  MAUSAM VAANI BACKEND API');
-  console.log('='.repeat(50));
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
-  console.log('='.repeat(50));
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log('='.repeat(50));
+    console.log('🌤️  MAUSAM VAANI BACKEND API');
+    console.log('='.repeat(50));
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🌐 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
+    console.log('='.repeat(50));
 
-  // Start merged notification scheduler when notification env is configured.
-  startScheduler();
-});
+    // Start merged notification scheduler when running as a long-lived server.
+    startScheduler();
+  });
+}
 
 module.exports = app;
