@@ -4,6 +4,9 @@ import { supabase } from "../services/supabaseClient";
 import { weatherService } from "../services/weatherService";
 
 const HYPERLOCAL_CACHE_KEY = "mv_last_hyperlocal_location";
+const VIT_BHOPAL_COORDS = { lat: 23.0778, lon: 76.8515 };
+const VIT_BHOPAL_CAMPUS_LABEL = "VIT Bhopal University";
+const VIT_BHOPAL_CAMPUS_ADDRESS = "VIT Bhopal University, Kotri Kalan, Near Indore Road, Bhopal, Madhya Pradesh 466114";
 
 const toRadians = (deg) => (deg * Math.PI) / 180;
 
@@ -18,6 +21,33 @@ const distanceInMeters = (lat1, lon1, lat2, lon2) => {
       Math.sin(dLon / 2) *
       Math.sin(dLon / 2);
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const shouldUseVitBhopalCampusFallback = (locationData = {}) => {
+  const lat = Number(locationData?.lat);
+  const lon = Number(locationData?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return false;
+  }
+
+  const distance = distanceInMeters(lat, lon, VIT_BHOPAL_COORDS.lat, VIT_BHOPAL_COORDS.lon);
+  const cityText = String(locationData?.city || "").toLowerCase();
+  const addressText = String(locationData?.formattedAddress || "").toLowerCase();
+  const looksGenericAshta = /ashta|tahsil|unknown/.test(cityText) || /ashta|tahsil/.test(addressText);
+
+  return distance <= 12000 && looksGenericAshta;
+};
+
+const normalizeCampusLocationLabel = (locationData = {}) => {
+  if (!shouldUseVitBhopalCampusFallback(locationData)) {
+    return locationData;
+  }
+
+  return {
+    ...locationData,
+    city: VIT_BHOPAL_CAMPUS_LABEL,
+    formattedAddress: VIT_BHOPAL_CAMPUS_ADDRESS,
+  };
 };
 
 const readCachedHyperlocal = () => {
@@ -54,6 +84,23 @@ export default function useLocation() {
   const [locationSource, setLocationSource] = useState("fallback");
   const { user, isLoggedIn, refreshProfile } = useAuth();
 
+  const canAutoUseGeolocation = async () => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      return false;
+    }
+
+    if (!navigator.permissions?.query) {
+      return false;
+    }
+
+    try {
+      const permission = await navigator.permissions.query({ name: "geolocation" });
+      return permission?.state === "granted";
+    } catch {
+      return false;
+    }
+  };
+
   // Get current device location with hyperlocal place lookup.
   const getCurrentLocation = () => {
     return new Promise((resolve, reject) => {
@@ -66,7 +113,7 @@ export default function useLocation() {
         async (pos) => {
           const lat = pos.coords.latitude;
           const lon = pos.coords.longitude;
-          const nearbyPlace = await weatherService.getNearbyPlaceName(lat, lon, { radius: 100 });
+          const nearbyPlace = await weatherService.getNearbyPlaceName(lat, lon, { radius: 1500 });
 
           const coords = {
             lat,
@@ -97,8 +144,9 @@ export default function useLocation() {
             coords.city = fallbackCity || "Unknown";
           }
 
-          setCurrentLocation(coords);
-          resolve(coords);
+          const normalizedCoords = normalizeCampusLocationLabel(coords);
+          setCurrentLocation(normalizedCoords);
+          resolve(normalizedCoords);
         },
         (err) => {
           reject(err);
@@ -155,19 +203,21 @@ export default function useLocation() {
         return false;
       }
 
+      const normalizedLocation = normalizeCampusLocationLabel(locationData);
+
       setSavedLocation({
-        lat: locationData.lat,
-        lon: locationData.lon,
-        city: locationData.city,
+        lat: normalizedLocation.lat,
+        lon: normalizedLocation.lon,
+        city: normalizedLocation.city,
       });
       setLocation({
-        lat: locationData.lat,
-        lon: locationData.lon,
-        city: locationData.city,
-        formattedAddress: locationData.formattedAddress || null,
-        placeId: locationData.placeId || null,
+        lat: normalizedLocation.lat,
+        lon: normalizedLocation.lon,
+        city: normalizedLocation.city,
+        formattedAddress: normalizedLocation.formattedAddress || null,
+        placeId: normalizedLocation.placeId || null,
       });
-      setLocationSource(locationData?.isCurrentLocation ? "current" : "saved");
+      setLocationSource(normalizedLocation?.isCurrentLocation ? "current" : "saved");
 
       await refreshProfile();
       return true;
@@ -190,36 +240,38 @@ export default function useLocation() {
         setSavedLocation(saved);
       }
 
-      // Priority 1: live location.
-      try {
-        finalLocation = await getCurrentLocation();
-        setLocationSource("current");
-      } catch (locError) {
-        console.warn("Location access denied:", locError.message);
+      const shouldAutoRequest = await canAutoUseGeolocation();
 
-        // Priority 2: saved profile location.
-        if (isLoggedIn) {
-          const saved = await getSavedLocation();
-          if (saved) {
-            finalLocation = saved;
-            setLocationSource("saved");
-            setError("Live location unavailable. Using your saved location.");
-          }
-        }
-
-        // Priority 3: hard fallback.
-        if (!finalLocation) {
-          finalLocation = {
-            lat: 28.6139,
-            lon: 77.209,
-            city: "New Delhi",
-          };
-          setLocationSource("fallback");
-          setError("Location access denied. Using default location.");
+      // Priority 1: saved profile location if present.
+      if (isLoggedIn) {
+        const saved = await getSavedLocation();
+        if (saved) {
+          finalLocation = saved;
+          setLocationSource("saved");
         }
       }
 
-      setLocation(finalLocation);
+      // Priority 2: live location only when browser permission is already granted.
+      if (shouldAutoRequest) {
+        try {
+          finalLocation = await getCurrentLocation();
+          setLocationSource("current");
+        } catch (locError) {
+          console.warn("Live location unavailable:", locError.message);
+        }
+      }
+
+      // Priority 3: hard fallback.
+      if (!finalLocation) {
+        finalLocation = {
+          lat: 28.6139,
+          lon: 77.209,
+          city: "New Delhi",
+        };
+        setLocationSource("fallback");
+      }
+
+      setLocation(normalizeCampusLocationLabel(finalLocation));
     } catch (err) {
       console.error("Location error:", err);
       setError(err.message);

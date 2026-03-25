@@ -159,7 +159,7 @@ function normalizeTipText(text, severity = 'medium') {
   }
 
   if (/high temperature conditions/i.test(raw)) {
-    return 'Dhoop tez ho sakti hai; paani saath rakho aur 12-4 PM heavy outdoor kaam avoid karo.';
+    return 'Dhoop tez ho sakti hai; paani saath rakho aur outdoor kaam ko cooler hours me shift karo.';
   }
 
   if (/heavy rainfall likely/i.test(raw)) {

@@ -43,7 +43,13 @@ const LocationSelector = ({ isOpen, onClose, onLocationSelect }) => {
     try {
       const location = await getCurrentLocation();
       if (location) {
-        const nearbyPlace = await weatherService.getNearbyPlaceName(location.lat, location.lon, { radius: 100 });
+        const nearbyPlace = location?.city && location.city !== 'Unknown'
+          ? {
+              name: location.city,
+              formattedAddress: location.formattedAddress,
+              placeId: location.placeId,
+            }
+          : await weatherService.getNearbyPlaceName(location.lat, location.lon, { radius: 1500 });
         const cityName = nearbyPlace?.name || (await weatherService.reverseGeocode(location.lat, location.lon));
         
         const locationData = {

@@ -5,7 +5,9 @@ const OWM_BASE = "https://api.openweathermap.org/data/2.5";
 const OWM_GEO = "https://api.openweathermap.org/geo/1.0";
 const OWM_ONECALL = "https://api.openweathermap.org/data/3.0/onecall";
 const GOOGLE_PLACES_API_KEY = import.meta.env.VITE_GOOGLE_PLACES_API_KEY || "";
-const ENABLE_GOOGLE_PLACES = (import.meta.env.VITE_ENABLE_GOOGLE_PLACES || "false").toLowerCase() === "true";
+const ENABLE_GOOGLE_PLACES =
+  Boolean(GOOGLE_PLACES_API_KEY) &&
+  String(import.meta.env.VITE_ENABLE_GOOGLE_PLACES ?? "true").toLowerCase() !== "false";
 const ENABLE_OSM_REVERSE = (import.meta.env.VITE_ENABLE_OSM_REVERSE || "false").toLowerCase() === "true";
 const ENABLE_OWM_ALERTS = (import.meta.env.VITE_ENABLE_OWM_ALERTS || "false").toLowerCase() === "true";
 const ENABLE_WEATHERAPI_AQI = (import.meta.env.VITE_ENABLE_WEATHERAPI_AQI || "false").toLowerCase() === "true";
@@ -56,8 +58,8 @@ const toUsAqiFromPm25 = (pm25) => {
   * Weather service — calls OpenWeatherMap directly.
  */
 export const weatherService = {
-  async getOpenStreetHyperlocalPlace(lat, lon) {
-    if (!ENABLE_OSM_REVERSE) {
+  async getOpenStreetHyperlocalPlace(lat, lon, options = {}) {
+    if (!ENABLE_OSM_REVERSE && !options?.bypassFlag) {
       return null;
     }
 
@@ -107,6 +109,52 @@ export const weatherService = {
     } catch {
       return null;
     }
+  },
+
+  async getBestNearbyFallback(lat, lon) {
+    const hyperlocal = await this.getOpenStreetHyperlocalPlace(lat, lon, { bypassFlag: true });
+    if (hyperlocal?.name) {
+      return hyperlocal;
+    }
+
+    const city = await this.reverseGeocode(lat, lon).catch(() => "Unknown");
+    if (!city || city === "Unknown") {
+      return null;
+    }
+
+    return {
+      placeId: null,
+      name: city,
+      formattedAddress: city,
+      coordinates: {
+        lat: Number(lat),
+        lon: Number(lon),
+      },
+    };
+  },
+
+  pickBestNearbyPlace(places = []) {
+    if (!Array.isArray(places) || places.length === 0) {
+      return null;
+    }
+
+    const scorePlace = (place) => {
+      const name = String(place?.displayName?.text || place?.formattedAddress || "").toLowerCase();
+      const address = String(place?.formattedAddress || "").toLowerCase();
+      const types = Array.isArray(place?.types)
+        ? place.types.map((type) => String(type || "").toLowerCase())
+        : [];
+
+      let score = 0;
+      if (types.includes("university") || types.includes("school") || types.includes("college")) score += 8;
+      if (types.includes("point_of_interest") || types.includes("establishment")) score += 3;
+      if (/university|campus|college|institute|school/.test(name)) score += 8;
+      if (/road|route|street|ward|district/.test(name)) score -= 4;
+      if (/university|campus|college|institute|school/.test(address)) score += 2;
+      return score;
+    };
+
+    return [...places].sort((a, b) => scorePlace(b) - scorePlace(a))[0] || places[0];
   },
 
   async getFullWeatherCached(lat, lon, { force = false } = {}) {
@@ -425,11 +473,9 @@ export const weatherService = {
     }
 
     if (!ENABLE_GOOGLE_PLACES || !GOOGLE_PLACES_API_KEY || disableGooglePlacesForSession) {
-      const osmFallback = ENABLE_OSM_REVERSE
-        ? await this.getOpenStreetHyperlocalPlace(lat, lon)
-        : null;
-      placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
-      return osmFallback;
+        const fallback = await this.getBestNearbyFallback(lat, lon);
+        placesResponseCache.set(key, { timestamp: Date.now(), data: fallback });
+        return fallback;
     }
 
     const requestPromise = (async () => {
@@ -438,10 +484,10 @@ export const weatherService = {
         headers: {
           "Content-Type": "application/json",
           "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
-          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location",
+          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.types",
         },
         body: JSON.stringify({
-          maxResultCount: 1,
+          maxResultCount: 5,
           rankPreference: "DISTANCE",
           locationRestriction: {
             circle: {
@@ -467,31 +513,25 @@ export const weatherService = {
             body: errorBody?.slice?.(0, 150),
           });
         }
-        const osmFallback = ENABLE_OSM_REVERSE
-          ? await this.getOpenStreetHyperlocalPlace(lat, lon)
-          : null;
-        placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
-        return osmFallback;
+          const fallback = await this.getBestNearbyFallback(lat, lon);
+          placesResponseCache.set(key, { timestamp: Date.now(), data: fallback });
+          return fallback;
       }
 
       const payload = await response.json();
-      const place = payload?.places?.[0];
+      const place = this.pickBestNearbyPlace(payload?.places || []);
 
       if (!place) {
-        const osmFallback = ENABLE_OSM_REVERSE
-          ? await this.getOpenStreetHyperlocalPlace(lat, lon)
-          : null;
-        placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
-        return osmFallback;
+          const fallback = await this.getBestNearbyFallback(lat, lon);
+          placesResponseCache.set(key, { timestamp: Date.now(), data: fallback });
+          return fallback;
       }
 
       const name = place?.displayName?.text || place?.formattedAddress || null;
       if (!name) {
-        const osmFallback = ENABLE_OSM_REVERSE
-          ? await this.getOpenStreetHyperlocalPlace(lat, lon)
-          : null;
-        placesResponseCache.set(key, { timestamp: Date.now(), data: osmFallback });
-        return osmFallback;
+          const fallback = await this.getBestNearbyFallback(lat, lon);
+          placesResponseCache.set(key, { timestamp: Date.now(), data: fallback });
+          return fallback;
       }
 
       const result = {
@@ -508,10 +548,7 @@ export const weatherService = {
       return result;
     })().catch(async (err) => {
       console.warn(`${WEATHER_DEBUG_PREFIX} Places lookup error`, err?.message || err);
-      if (!ENABLE_OSM_REVERSE) {
-        return null;
-      }
-      return this.getOpenStreetHyperlocalPlace(lat, lon);
+        return this.getBestNearbyFallback(lat, lon);
     }).finally(() => {
       placesInFlightRequests.delete(key);
     });
