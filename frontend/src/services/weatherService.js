@@ -133,30 +133,6 @@ export const weatherService = {
     };
   },
 
-  pickBestNearbyPlace(places = []) {
-    if (!Array.isArray(places) || places.length === 0) {
-      return null;
-    }
-
-    const scorePlace = (place) => {
-      const name = String(place?.displayName?.text || place?.formattedAddress || "").toLowerCase();
-      const address = String(place?.formattedAddress || "").toLowerCase();
-      const types = Array.isArray(place?.types)
-        ? place.types.map((type) => String(type || "").toLowerCase())
-        : [];
-
-      let score = 0;
-      if (types.includes("university") || types.includes("school") || types.includes("college")) score += 8;
-      if (types.includes("point_of_interest") || types.includes("establishment")) score += 3;
-      if (/university|campus|college|institute|school/.test(name)) score += 8;
-      if (/road|route|street|ward|district/.test(name)) score -= 4;
-      if (/university|campus|college|institute|school/.test(address)) score += 2;
-      return score;
-    };
-
-    return [...places].sort((a, b) => scorePlace(b) - scorePlace(a))[0] || places[0];
-  },
-
   async getFullWeatherCached(lat, lon, { force = false } = {}) {
     const key = getCoordCacheKey(lat, lon);
     const now = Date.now();
@@ -484,10 +460,10 @@ export const weatherService = {
         headers: {
           "Content-Type": "application/json",
           "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
-          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.types",
+          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location",
         },
         body: JSON.stringify({
-          maxResultCount: 5,
+          maxResultCount: 1,
           rankPreference: "DISTANCE",
           locationRestriction: {
             circle: {
@@ -519,7 +495,7 @@ export const weatherService = {
       }
 
       const payload = await response.json();
-      const place = this.pickBestNearbyPlace(payload?.places || []);
+      const place = payload?.places?.[0];
 
       if (!place) {
           const fallback = await this.getBestNearbyFallback(lat, lon);

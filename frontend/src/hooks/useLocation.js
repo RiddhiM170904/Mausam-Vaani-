@@ -4,9 +4,9 @@ import { supabase } from "../services/supabaseClient";
 import { weatherService } from "../services/weatherService";
 
 const HYPERLOCAL_CACHE_KEY = "mv_last_hyperlocal_location";
-const VIT_BHOPAL_COORDS = { lat: 23.0778, lon: 76.8515 };
-const VIT_BHOPAL_CAMPUS_LABEL = "VIT Bhopal University";
-const VIT_BHOPAL_CAMPUS_ADDRESS = "VIT Bhopal University, Kotri Kalan, Near Indore Road, Bhopal, Madhya Pradesh 466114";
+const VIT_BHOPAL_COORDS = { lat: 23.0779, lon: 76.8508 };
+const VIT_BHOPAL_LABEL = "Academic Block-1 VIT Bhopal University";
+const VIT_BHOPAL_ADDRESS = "VIT Bhopal University, Kotri Kalan, Near Indore Road, Bhopal, Madhya Pradesh 466114";
 
 const toRadians = (deg) => (deg * Math.PI) / 180;
 
@@ -23,31 +23,9 @@ const distanceInMeters = (lat1, lon1, lat2, lon2) => {
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
-const shouldUseVitBhopalCampusFallback = (locationData = {}) => {
-  const lat = Number(locationData?.lat);
-  const lon = Number(locationData?.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    return false;
-  }
-
+const isNearVitBhopalCampus = (lat, lon) => {
   const distance = distanceInMeters(lat, lon, VIT_BHOPAL_COORDS.lat, VIT_BHOPAL_COORDS.lon);
-  const cityText = String(locationData?.city || "").toLowerCase();
-  const addressText = String(locationData?.formattedAddress || "").toLowerCase();
-  const looksGenericAshta = /ashta|tahsil|unknown/.test(cityText) || /ashta|tahsil/.test(addressText);
-
-  return distance <= 12000 && looksGenericAshta;
-};
-
-const normalizeCampusLocationLabel = (locationData = {}) => {
-  if (!shouldUseVitBhopalCampusFallback(locationData)) {
-    return locationData;
-  }
-
-  return {
-    ...locationData,
-    city: VIT_BHOPAL_CAMPUS_LABEL,
-    formattedAddress: VIT_BHOPAL_CAMPUS_ADDRESS,
-  };
+  return distance <= 10000;
 };
 
 const readCachedHyperlocal = () => {
@@ -113,6 +91,22 @@ export default function useLocation() {
         async (pos) => {
           const lat = pos.coords.latitude;
           const lon = pos.coords.longitude;
+
+          if (isNearVitBhopalCampus(lat, lon)) {
+            const hardcodedCampusLocation = {
+              lat,
+              lon,
+              city: VIT_BHOPAL_LABEL,
+              formattedAddress: VIT_BHOPAL_ADDRESS,
+              placeId: "hardcoded-vit-bhopal",
+            };
+
+            writeCachedHyperlocal(hardcodedCampusLocation);
+            setCurrentLocation(hardcodedCampusLocation);
+            resolve(hardcodedCampusLocation);
+            return;
+          }
+
           const nearbyPlace = await weatherService.getNearbyPlaceName(lat, lon, { radius: 1500 });
 
           const coords = {
@@ -144,9 +138,8 @@ export default function useLocation() {
             coords.city = fallbackCity || "Unknown";
           }
 
-          const normalizedCoords = normalizeCampusLocationLabel(coords);
-          setCurrentLocation(normalizedCoords);
-          resolve(normalizedCoords);
+          setCurrentLocation(coords);
+          resolve(coords);
         },
         (err) => {
           reject(err);
@@ -203,21 +196,19 @@ export default function useLocation() {
         return false;
       }
 
-      const normalizedLocation = normalizeCampusLocationLabel(locationData);
-
       setSavedLocation({
-        lat: normalizedLocation.lat,
-        lon: normalizedLocation.lon,
-        city: normalizedLocation.city,
+        lat: locationData.lat,
+        lon: locationData.lon,
+        city: locationData.city,
       });
       setLocation({
-        lat: normalizedLocation.lat,
-        lon: normalizedLocation.lon,
-        city: normalizedLocation.city,
-        formattedAddress: normalizedLocation.formattedAddress || null,
-        placeId: normalizedLocation.placeId || null,
+        lat: locationData.lat,
+        lon: locationData.lon,
+        city: locationData.city,
+        formattedAddress: locationData.formattedAddress || null,
+        placeId: locationData.placeId || null,
       });
-      setLocationSource(normalizedLocation?.isCurrentLocation ? "current" : "saved");
+      setLocationSource(locationData?.isCurrentLocation ? "current" : "saved");
 
       await refreshProfile();
       return true;
@@ -271,7 +262,7 @@ export default function useLocation() {
         setLocationSource("fallback");
       }
 
-      setLocation(normalizeCampusLocationLabel(finalLocation));
+      setLocation(finalLocation);
     } catch (err) {
       console.error("Location error:", err);
       setError(err.message);

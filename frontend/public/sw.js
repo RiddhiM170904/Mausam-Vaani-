@@ -1,6 +1,5 @@
-const CACHE_NAME = 'mausam-vaani-v2';
+const CACHE_NAME = 'mausam-vaani-v3';
 const urlsToCache = [
-  '/',
   '/manifest.json',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png'
@@ -31,6 +30,25 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     (async () => {
+      const isNavigationRequest =
+        event.request.mode === 'navigate' ||
+        requestUrl.pathname === '/' ||
+        requestUrl.pathname.endsWith('/index.html');
+
+      // Always prefer network for HTML/navigation so new deployments don't keep stale hashed asset references.
+      if (isNavigationRequest) {
+        try {
+          const freshPage = await fetch(event.request);
+          const cache = await caches.open(CACHE_NAME);
+          cache.put('/', freshPage.clone());
+          return freshPage;
+        } catch {
+          const cachedPage = await caches.match('/') || await caches.match('/index.html');
+          if (cachedPage) return cachedPage;
+          return Response.error();
+        }
+      }
+
       if (requestUrl.pathname === '/manifest.json') {
         try {
           const fresh = await fetch(event.request);
@@ -50,7 +68,12 @@ self.addEventListener('fetch', (event) => {
       }
 
       try {
-        return await fetch(event.request);
+        const fresh = await fetch(event.request);
+        if (fresh && fresh.ok && /\.(?:js|css|png|jpg|jpeg|svg|webp|ico)$/i.test(requestUrl.pathname)) {
+          const cache = await caches.open(CACHE_NAME);
+          cache.put(event.request, fresh.clone());
+        }
+        return fresh;
       } catch {
         return Response.error();
       }
