@@ -80,6 +80,20 @@
           "options": ["city", "highway", "mixed", "hilly"],
           "label": "Primary route type",
           "required": true
+        },
+        {
+          "key": "start_location",
+          "type": "text",
+          "label": "Start location (area/city or pincode)",
+          "placeholder": "Example: Bhopal ISBT, 462001",
+          "required": true
+        },
+        {
+          "key": "end_location",
+          "type": "text",
+          "label": "End location (area/city or pincode)",
+          "placeholder": "Example: Ashta Bus Stand, 466116",
+          "required": true
         }
       ],
       "optional": [
@@ -331,6 +345,20 @@
           "type": "select",
           "options": ["low", "medium", "high", "very_high"],
           "label": "How strict are delivery time windows?",
+          "required": true
+        },
+        {
+          "key": "start_location",
+          "type": "text",
+          "label": "Start location (area/city or pincode)",
+          "placeholder": "Example: Warehouse A, Bhopal, 462001",
+          "required": true
+        },
+        {
+          "key": "end_location",
+          "type": "text",
+          "label": "End location (area/city or pincode)",
+          "placeholder": "Example: Delivery zone, Ashta, 466116",
           "required": true
         }
       ],

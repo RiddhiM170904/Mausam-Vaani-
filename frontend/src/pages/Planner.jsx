@@ -93,6 +93,34 @@ const isQuestionActive = (question, answers) => {
   return answers?.[question.depends_on.key] === question.depends_on.value;
 };
 
+const normalizeWeatherUnits = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  return text
+    .replace(/(-?\d+(?:\.\d+)?)\s*°?\s*C\b/gi, "$1°C")
+    .replace(/\bNA\b/gi, "N/A")
+    .replace(/\bkm\/?h\b/gi, "km/h");
+};
+
+const formatRecommendationSections = (recommendation) => {
+  const lines = String(recommendation || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  return lines
+    .map((line) => {
+      const match = line.match(/^([^:]+):\s*(.+)$/);
+      if (!match) return null;
+      return {
+        label: match[1].trim(),
+        value: normalizeWeatherUnits(match[2].trim()),
+      };
+    })
+    .filter(Boolean);
+};
+
 export default function Planner() {
   const { isLoggedIn, user, refreshProfile } = useAuth();
   const { location } = useLocation();
@@ -202,6 +230,7 @@ export default function Planner() {
     (question) => question.required && !isAnswerProvided(profileAnswers[question.key])
   );
   const plannerReady = profileCompleted && !profileLoading;
+  const recommendationSections = formatRecommendationSections(result?.recommendation);
 
   // Get persona display name
   const getPersonaLabel = (persona) => {
@@ -851,9 +880,20 @@ export default function Planner() {
                           {result.riskLevel} Risk
                         </span>
                       </div>
-                      <p className="font-medium leading-relaxed text-white">
-                        {result.recommendation}
-                      </p>
+                      {recommendationSections.length > 0 ? (
+                        <div className="space-y-2">
+                          {recommendationSections.map((section) => (
+                            <div key={section.label} className="text-sm leading-relaxed text-gray-200">
+                              <span className="font-semibold text-white">{section.label}:</span>{" "}
+                              <span>{section.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="font-medium leading-relaxed text-white whitespace-pre-line">
+                          {normalizeWeatherUnits(result.recommendation)}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </GlassCard>
@@ -866,7 +906,7 @@ export default function Planner() {
                         <CheckCircle className="w-4 h-4 text-green-400" />
                         <span className="text-xs font-semibold text-green-400">Best Time</span>
                       </div>
-                      <p className="text-xl font-bold text-white">{result.bestTime}</p>
+                      <p className="text-xl font-bold text-white">{normalizeWeatherUnits(result.bestTime)}</p>
                     </GlassCard>
                   )}
                   
@@ -876,7 +916,7 @@ export default function Planner() {
                         <AlertTriangle className="w-4 h-4 text-red-400" />
                         <span className="text-xs font-semibold text-red-400">Avoid</span>
                       </div>
-                      <p className="text-xl font-bold text-white">{result.avoidTime}</p>
+                      <p className="text-xl font-bold text-white">{normalizeWeatherUnits(result.avoidTime)}</p>
                     </GlassCard>
                   )}
                 </div>
@@ -894,7 +934,7 @@ export default function Planner() {
                           <span className="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-400 text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
                             {index + 1}
                           </span>
-                          <span className="text-sm text-gray-300">{tip}</span>
+                          <span className="text-sm text-gray-300">{normalizeWeatherUnits(tip)}</span>
                         </li>
                       ))}
                     </ul>
@@ -910,7 +950,7 @@ export default function Planner() {
                     </h3>
                     <div className="grid grid-cols-2 gap-4 text-center sm:grid-cols-4">
                       <div>
-                        <p className="text-xl font-bold text-white">{weatherData.current?.temp}°</p>
+                        <p className="text-xl font-bold text-white">{weatherData.current?.temp}°C</p>
                         <p className="text-[10px] text-gray-500">Temp</p>
                       </div>
                       <div>
@@ -918,7 +958,7 @@ export default function Planner() {
                         <p className="text-[10px] text-gray-500">Humidity</p>
                       </div>
                       <div>
-                        <p className="text-xl font-bold text-white">{weatherData.current?.wind}</p>
+                        <p className="text-xl font-bold text-white">{weatherData.current?.wind} km/h</p>
                         <p className="text-[10px] text-gray-500">Wind km/h</p>
                       </div>
                       <div>

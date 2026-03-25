@@ -8,10 +8,13 @@ import {
   HiOutlineSparkles,
   HiOutlineUser,
 } from "react-icons/hi2";
+import {
+  WiRaindrops,
+} from "react-icons/wi";
 
 const links = [
   { to: "/", icon: HiOutlineHome, label: "Home" },
-  { to: "/forecast", icon: HiOutlineCalendarDays, label: "Forecast" },
+  { to: "/forecast", icon: WiRaindrops, label: "Forecast" },
   { to: "/planner", icon: HiOutlineCalendarDays, label: "Planner" },
   { to: "/insights", icon: HiOutlineSparkles, label: "Insights" },
   { to: "/map", icon: HiOutlineMap, label: "Map" },

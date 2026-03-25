@@ -143,7 +143,7 @@ function buildReasoningContext(context, ragContext) {
   };
 }
 
-function sanitizeInsightOutput(text) {
+function sanitizeInsightOutput(text, { plannerMode = false } = {}) {
   let cleaned = String(text || '')
     .replace(/```[\s\S]*?```/g, '')
     .replace(/\r/g, '')
@@ -174,7 +174,11 @@ function sanitizeInsightOutput(text) {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-    .slice(0, 3);
+    .slice(0, plannerMode ? 8 : 3);
+
+  if (plannerMode) {
+    return lines.join('\n').trim();
+  }
 
   return lines.join(' ').replace(/\s+/g, ' ').trim();
 }
@@ -253,6 +257,7 @@ function buildPlannerPrompt(context, ragContext) {
     duration: plannerContext?.duration || null,
     risks: plannerContext?.risks || [],
     notes: plannerContext?.notes || '',
+    route_weather: plannerContext?.route_weather || null,
   };
 
   return [
@@ -263,18 +268,22 @@ function buildPlannerPrompt(context, ragContext) {
     '- Focus on feasibility, safest timing, and what user should do next.',
     '',
     'Planner rules (must follow):',
-    '- Give a detailed but concise planner answer in 3 lines.',
-    '- Hinglish, friendly WhatsApp tone, max 1 emoji per line.',
-    '- Mention best time window naturally.',
-    '- Mention what to avoid if risk exists.',
+    '- Give a detailed but concise planner answer in exactly 6 lines.',
+    '- Hinglish, practical tone, at most 1 emoji in total.',
+    '- Compare start and destination weather if route_weather is available.',
+    '- Mention best time window and avoid/delay window clearly.',
+    '- Give route-safety precautions (visibility, rain, heat, AQI, hydration, buffer).',
     '- Give at least one alternative suggestion if current slot is risky.',
     '- Do not use robotic wording or vague generic lines.',
     '- Do not repeat greeting or raw RAG labels.',
     '',
-    'Output structure (plain text, no headings):',
-    'Line 1: feasibility verdict for selected activity + current context.',
-    'Line 2: clear actionable advice (carry/avoid/use/timing).',
-    'Line 3: best time + alternative suggestion if needed.',
+    'Output structure (strict, keep these labels):',
+    'Line 1: Overall: <verdict + one-line reason>.',
+    'Line 2: Start Weather: <condition + temp/feels/rain/wind summary>.',
+    'Line 3: End Weather: <condition + temp/feels/rain/wind summary>.',
+    'Line 4: Best Time: <best window + why>.',
+    'Line 5: Avoid/Delay: <window/condition to avoid>.',
+    'Line 6: Care Points: <3 concise precautions in one line separated by ;>.',
     '',
     'User-type nuance:',
     userToneGuidance,
@@ -302,24 +311,52 @@ function fallbackInsight(context, ragContext) {
     const temp = Number(weather?.temp || 0);
     const rainProbability = Number(weather?.rain_probability || 0);
     const aqi = Number(weather?.aqi || 0);
+    const routeWeather = plannerContext?.route_weather || null;
+    const startSummary = routeWeather?.startSummary || 'Not available';
+    const endSummary = routeWeather?.endSummary || 'Not available';
+
+    let overall = `${activity} manageable hai.`;
+    let avoidWindow = rainProbability >= 0.55 ? 'Heavy rain spells and low-visibility patches' : 'Peak heat/traffic rush windows';
+    let carePoints = 'Hydration maintain karo; live rain radar check karo; travel buffer 20-30 min rakho.';
 
     if (rainProbability >= 0.55) {
-      return `Hey 👋 ${activity} ke liye is slot me rain risk thoda high lag raha hai 🌧️ Agar zaruri ho to umbrella/raincoat le jaana aur travel buffer rakhna better rahega 👍 Best window possible ho to ${timeEnd} ke baad plan shift karo.`;
+      overall = `${activity} possible hai but rain risk high hai.`;
+      avoidWindow = 'Jab intense rain ya waterlogging alerts aaye';
+      carePoints = 'Rain gear carry karo; braking distance badhao; critical stops pe delay buffer rakho.';
     }
 
     if (temp >= 34 && aqi >= 130) {
-      return `Hey 👋 ${activity} abhi possible hai but heat + air quality ka impact reh sakta hai 🌫️ Paani saath rakho, mask use karo aur long outdoor exposure avoid karo 👍 Better option: ${timeStart}-${timeEnd} me shaded/indoor alternative consider karo.`;
+      overall = `${activity} possible hai but heat + AQI combined stress high ho sakta hai.`;
+      avoidWindow = 'Direct sun + traffic dense corridor during peak hour';
+      carePoints = 'N95/mask use karo; paani frequently lo; shaded halt points plan karo.';
     }
 
-    if (temp >= 34) {
-      return `Hey 👋 ${activity} ke liye current slot me heat thodi high rahegi ☀️ Direct dhoop avoid karo, hydration maintain rakho aur lightweight gear use karo 👍 Best time: ${timeEnd} ke aas-paas ya shaam ka cooler window.`;
+    if (temp >= 34 && aqi < 130) {
+      overall = `${activity} doable hai but heat elevated hai.`;
+      avoidWindow = '12:00-16:00 direct sun exposure';
+      carePoints = 'ORS/water carry karo; breathable clothing pehno; frequent short breaks lo.';
     }
 
-    if (aqi >= 130) {
-      return `Hey 👋 ${activity} plan ho sakta hai, but hawa thodi heavy feel ho sakti hai 🌫️ Mask carry karo aur unnecessary outdoor waiting avoid karo 👍 Alternative: short indoor prep karke low-traffic window me niklo.`;
+    if (aqi >= 130 && temp < 34) {
+      overall = `${activity} possible hai but air quality concern rahega.`;
+      avoidWindow = 'Dusty/high-traffic segments';
+      carePoints = 'Mask ready rakho; prolonged roadside waiting avoid karo; indoor prep pehle karo.';
     }
 
-    return `Hey 👋 ${activity} ke liye conditions abhi kaafi manageable lag rahi hain 🙂 Start smooth rakho, essentials saath rakho aur timing disciplined rakhna 👍 Best window: ${timeStart}-${timeEnd}; agar delay ho to next calm slot choose karo.`;
+    if (temp < 34 && aqi < 130 && rainProbability < 0.55) {
+      overall = `${activity} ke liye conditions mostly favorable hain.`;
+      avoidWindow = 'Sudden weather-shift alerts ke time';
+      carePoints = 'Essentials ready rakho; route alerts monitor karo; pace steady rakho.';
+    }
+
+    return [
+      `Overall: ${overall}`,
+      `Start Weather: ${startSummary}.`,
+      `End Weather: ${endSummary}.`,
+      `Best Time: ${timeStart}-${timeEnd} window best hai; agar possible ho to low-traffic slot choose karo.`,
+      `Avoid/Delay: ${avoidWindow}.`,
+      `Care Points: ${carePoints}`,
+    ].join('\n');
   }
 
   const weather = context?.weather || {};
@@ -528,12 +565,12 @@ export async function generateInsight(context, ragContext) {
   if (AI_CONFIG.llmProvider === 'groq' && hasGroqKey()) {
     try {
       const result = await callGroq(prompt);
-      let text = sanitizeInsightOutput(result?.text || '');
+      let text = sanitizeInsightOutput(result?.text || '', { plannerMode: isPlannerIntent });
       let validation = validateInsightText(text);
 
       if (!validation.ok) {
         const repaired = await callGroq(buildRepairPrompt(text, context));
-        const repairedText = sanitizeInsightOutput(repaired?.text || '');
+        const repairedText = sanitizeInsightOutput(repaired?.text || '', { plannerMode: isPlannerIntent });
         const repairedValidation = validateInsightText(repairedText);
         if (repairedValidation.ok) {
           text = repairedText;
@@ -557,7 +594,7 @@ export async function generateInsight(context, ragContext) {
   if (AI_CONFIG.llmProvider === 'gemini' && hasGeminiKey()) {
     try {
       const result = await callGemini(prompt);
-      const text = sanitizeInsightOutput(result?.text || '');
+      const text = sanitizeInsightOutput(result?.text || '', { plannerMode: isPlannerIntent });
       const isValid = !looksIncomplete(text) && seemsActionable(text) && !isGeneric(text);
       const value = isValid ? text : fallbackInsight(context, ragContext);
       insightCache.set(key, { ts: Date.now(), value });

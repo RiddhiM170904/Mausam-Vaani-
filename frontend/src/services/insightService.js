@@ -1,4 +1,8 @@
 import { getPersonalizedInsight } from "../../AI/index.js";
+import { weatherService } from "./weatherService.js";
+
+const OWM_KEY = import.meta.env.VITE_OWM_KEY || '';
+const OWM_GEO_BASE = 'https://api.openweathermap.org/geo/1.0';
 
 const INSIGHT_CACHE_PREFIX = "mv_ai_quick_insight_v7";
 const INSIGHT_LAST_ACTIVE_KEY = "mv_ai_last_active_at";
@@ -229,7 +233,435 @@ function extractPlannerWindows(text = '') {
   };
 }
 
-function buildPlannerRequirements(plannerData = {}) {
+function formatPlannerRecommendationTemplate({
+  rawText = '',
+  bestTime,
+  avoidTime,
+  routeWeatherContext,
+  tips = [],
+  activity = 'activity',
+} = {}) {
+  const content = String(rawText || '').trim();
+  const sourceLines = content
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const hasStructuredSections = sourceLines.some((line) => /^overall\s*:/i.test(line))
+    && sourceLines.some((line) => /^best\s*time\s*:/i.test(line));
+
+  if (hasStructuredSections) {
+    return sourceLines.slice(0, 8).join('\n');
+  }
+
+  const startSummary = routeWeatherContext?.startSummary || 'Not available';
+  const endSummary = routeWeatherContext?.endSummary || 'Not resolved from OpenWeather';
+  const trimmedTips = Array.isArray(tips)
+    ? tips.map((tip) => String(tip || '').trim()).filter(Boolean).slice(0, 3)
+    : [];
+  const careLine = trimmedTips.length
+    ? trimmedTips.join('; ')
+    : 'Hydration maintain karo; live weather updates check karo; travel buffer 20-30 min rakho.';
+  const overall = content || `${activity} plan possible hai, but route weather ko dekhkar timing optimize karna better rahega.`;
+
+  return [
+    `Overall: ${overall}`,
+    `Start Weather: ${startSummary}.`,
+    `End Weather: ${endSummary}.`,
+    `Best Time: ${bestTime || 'Follow your selected low-risk slot'}.`,
+    `Avoid/Delay: ${avoidTime || 'Peak risk windows with rain, low visibility, or heavy traffic'}.`,
+    `Care Points: ${careLine}`,
+  ].join('\n');
+}
+
+function parseHourToInt(timeLabel = '') {
+  const match = String(timeLabel || '').match(/^(\d{1,2}):/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  return Number.isFinite(hour) && hour >= 0 && hour <= 23 ? hour : null;
+}
+
+function normalizeHourRange(timeRange = {}) {
+  const startHour = parseHourToInt(timeRange?.start || '09:00');
+  const endHour = parseHourToInt(timeRange?.end || '18:00');
+
+  if (!Number.isFinite(startHour) || !Number.isFinite(endHour)) {
+    return { startHour: 9, endHour: 18 };
+  }
+
+  if (endHour <= startHour) {
+    return { startHour, endHour: Math.min(startHour + 8, 23) };
+  }
+
+  return { startHour, endHour };
+}
+
+function toTwoDigitHour(hour) {
+  return String(Math.max(0, Math.min(23, Number(hour) || 0))).padStart(2, '0');
+}
+
+function formatHourWindow(startHour, width = 2) {
+  const safeStart = Math.max(0, Math.min(23, Number(startHour) || 0));
+  const safeEnd = Math.max(0, Math.min(23, safeStart + Math.max(1, width)));
+  return `${toTwoDigitHour(safeStart)}:00 to ${toTwoDigitHour(safeEnd)}:00`;
+}
+
+function buildCombinedHourlyRisk(routeWeatherContext, timeRange = {}) {
+  const startHourly = Array.isArray(routeWeatherContext?.start?.weather?.hourly)
+    ? routeWeatherContext.start.weather.hourly
+    : [];
+  const endHourly = Array.isArray(routeWeatherContext?.end?.weather?.hourly)
+    ? routeWeatherContext.end.weather.hourly
+    : [];
+
+  if (!startHourly.length && !endHourly.length) {
+    return [];
+  }
+
+  const { startHour, endHour } = normalizeHourRange(timeRange);
+  const byHour = new Map();
+
+  const applyHourly = (items = [], weight = 1) => {
+    for (const item of items) {
+      const hour = parseHourToInt(item?.time);
+      if (!Number.isFinite(hour)) continue;
+      if (hour < startHour || hour > endHour) continue;
+
+      const temp = Number(item?.temp);
+      const rain = Number(item?.rainProbability ?? item?.pop);
+      const wind = Number(item?.wind);
+
+      const tempRisk = Number.isFinite(temp) ? Math.max(0, temp - 30) : 2;
+      const rainRisk = Number.isFinite(rain) ? rain / 10 : 2;
+      const windRisk = Number.isFinite(wind) ? wind / 12 : 1;
+      const risk = (tempRisk + rainRisk + windRisk) * weight;
+
+      const prev = byHour.get(hour) || { hour, risk: 0, count: 0 };
+      prev.risk += risk;
+      prev.count += weight;
+      byHour.set(hour, prev);
+    }
+  };
+
+  applyHourly(startHourly, 1);
+  applyHourly(endHourly, 1);
+
+  return Array.from(byHour.values())
+    .map((item) => ({
+      hour: item.hour,
+      risk: item.count > 0 ? item.risk / item.count : item.risk,
+    }))
+    .sort((a, b) => a.hour - b.hour);
+}
+
+function deriveRouteTimingGuidance(routeWeatherContext, plannerData = {}) {
+  const hourlyRisk = buildCombinedHourlyRisk(routeWeatherContext, plannerData?.timeRange || {});
+  if (!hourlyRisk.length) {
+    return { bestTime: null, avoidTime: null };
+  }
+
+  const sortedByRisk = [...hourlyRisk].sort((a, b) => a.risk - b.risk);
+  const bestHour = sortedByRisk[0]?.hour;
+  const worstHour = sortedByRisk[sortedByRisk.length - 1]?.hour;
+
+  return {
+    bestTime: Number.isFinite(bestHour) ? formatHourWindow(bestHour, 2) : null,
+    avoidTime: Number.isFinite(worstHour) ? formatHourWindow(worstHour, 2) : null,
+  };
+}
+
+async function searchCityWithOpenWeather(query = '') {
+  const searchQuery = String(query || '').trim();
+  if (!searchQuery || !OWM_KEY) {
+    return [];
+  }
+
+  const response = await fetch(
+    `${OWM_GEO_BASE}/direct?q=${encodeURIComponent(searchQuery)}&limit=5&appid=${OWM_KEY}`
+  );
+
+  if (!response.ok) {
+    return [];
+  }
+
+  const result = await response.json();
+  return (result || []).map((item) => ({
+    name: item.name,
+    state: item.state,
+    country: item.country,
+    lat: item.lat,
+    lon: item.lon,
+  }));
+}
+
+async function searchByOpenWeatherPostalCode(postalCode = '', countryCode = 'IN') {
+  const code = String(postalCode || '').trim();
+  if (!code || !OWM_KEY) {
+    return [];
+  }
+
+  const response = await fetch(
+    `${OWM_GEO_BASE}/zip?zip=${encodeURIComponent(`${code},${countryCode}`)}&appid=${OWM_KEY}`
+  );
+
+  if (!response.ok) {
+    return [];
+  }
+
+  const item = await response.json();
+  if (!item || !Number.isFinite(Number(item.lat)) || !Number.isFinite(Number(item.lon))) {
+    return [];
+  }
+
+  return [{
+    name: item.name || code,
+    state: item.state || '',
+    country: item.country || countryCode,
+    lat: item.lat,
+    lon: item.lon,
+  }];
+}
+
+function extractPostalCodes(query = '') {
+  const text = String(query || '');
+  const matches = text.match(/\b\d{5,6}\b/g);
+  return matches ? [...new Set(matches)] : [];
+}
+
+function normalizeLocationText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function scoreLocationMatch(rawQuery = '', candidate = {}) {
+  const query = normalizeLocationText(rawQuery);
+  const candidateText = normalizeLocationText(
+    [candidate?.name, candidate?.state, candidate?.country].filter(Boolean).join(' ')
+  );
+
+  if (!query || !candidateText) {
+    return 0;
+  }
+
+  const queryTokens = query.split(' ').filter(Boolean);
+  const candidateTokens = new Set(candidateText.split(' ').filter(Boolean));
+  const overlap = queryTokens.reduce((sum, token) => sum + (candidateTokens.has(token) ? 1 : 0), 0);
+  const startsBoost = candidateText.startsWith(queryTokens[0] || '') ? 2 : 0;
+  const includesBoost = query && candidateText.includes(query) ? 3 : 0;
+
+  return overlap * 2 + startsBoost + includesBoost;
+}
+
+function dedupeLocationMatches(matches = []) {
+  const map = new Map();
+  for (const item of matches) {
+    const lat = Number(item?.lat);
+    const lon = Number(item?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const key = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+    if (!map.has(key)) {
+      map.set(key, item);
+    }
+  }
+  return Array.from(map.values());
+}
+
+function chooseBestLocationMatch(rawQuery = '', matches = []) {
+  const uniqueMatches = dedupeLocationMatches(matches);
+  if (!uniqueMatches.length) {
+    return null;
+  }
+
+  let best = uniqueMatches[0];
+  let bestScore = scoreLocationMatch(rawQuery, best);
+
+  for (let i = 1; i < uniqueMatches.length; i += 1) {
+    const current = uniqueMatches[i];
+    const score = scoreLocationMatch(rawQuery, current);
+    if (score > bestScore) {
+      best = current;
+      bestScore = score;
+    }
+  }
+
+  return best;
+}
+
+function buildLocationQueryCandidates(query = '') {
+  const source = String(query || '').trim();
+  if (!source) {
+    return [];
+  }
+
+  const cleaned = source
+    .replace(/\s+/g, ' ')
+    .replace(/[|/\\]+/g, ' ')
+    .replace(/\s*,\s*/g, ',')
+    .trim();
+
+  // Helps with common typos like "Bhopall" -> "Bhopal"
+  const deDuplicatedChars = cleaned.replace(/(.)\1{1,}/g, '$1');
+  const parts = cleaned.split(',').map((p) => p.trim()).filter(Boolean);
+  const words = cleaned.split(' ').map((w) => w.trim()).filter(Boolean);
+  const swappedTwoWord = words.length >= 2 ? `${words[words.length - 1]} ${words[0]}` : '';
+  const lastTwoWords = words.length >= 2 ? words.slice(-2).join(' ') : '';
+
+  const candidates = [
+    cleaned,
+    deDuplicatedChars,
+    parts[0] || '',
+    parts.slice(0, 2).join(' '),
+    swappedTwoWord,
+    lastTwoWords,
+  ];
+
+  return [...new Set(candidates.map((item) => String(item || '').trim()).filter(Boolean))];
+}
+
+async function resolveBySearchCandidates(query = '') {
+  const candidates = buildLocationQueryCandidates(query);
+  const postalCodes = extractPostalCodes(query);
+  const allMatches = [];
+
+  for (const code of postalCodes) {
+    const postalMatchesIN = await searchByOpenWeatherPostalCode(code, 'IN');
+    if (postalMatchesIN.length) {
+      allMatches.push(...postalMatchesIN);
+      continue;
+    }
+
+    const postalMatchesUS = await searchByOpenWeatherPostalCode(code, 'US');
+    if (postalMatchesUS.length) {
+      allMatches.push(...postalMatchesUS);
+    }
+  }
+
+  for (const candidate of candidates) {
+    const openWeatherMatches = await searchCityWithOpenWeather(candidate);
+    if (Array.isArray(openWeatherMatches) && openWeatherMatches.length > 0) {
+      allMatches.push(...openWeatherMatches);
+    }
+
+    const serviceMatches = await weatherService.searchCity(candidate);
+    if (Array.isArray(serviceMatches) && serviceMatches.length > 0) {
+      allMatches.push(...serviceMatches);
+    }
+  }
+
+  return dedupeLocationMatches(allMatches);
+}
+
+function summarizeRouteWeatherPoint(point = {}) {
+  if (!point || !point.city || !point.weather) {
+    return null;
+  }
+
+  const current = point.weather.current || {};
+  const temp = Number(current.temp);
+  const feelsLike = Number(current.feelsLike ?? current.feels_like);
+  const rainProb = Number(current.rain_probability ?? current.rainProbability);
+  const wind = Number(current.wind);
+  const humidity = Number(current.humidity);
+  const condition = current.condition || 'Unknown';
+
+  const tempText = Number.isFinite(temp) ? `${Math.round(temp)}C` : 'NA';
+  const feelsLikeText = Number.isFinite(feelsLike) ? `${Math.round(feelsLike)}C` : 'NA';
+  const rainText = Number.isFinite(rainProb) ? `${Math.round(rainProb)}%` : 'NA';
+  const windText = Number.isFinite(wind) ? `${Math.round(wind)} km/h` : 'NA';
+  const humidityText = Number.isFinite(humidity) ? `${Math.round(humidity)}%` : 'NA';
+
+  return `${point.city}: ${condition}, temp ${tempText}, feels like ${feelsLikeText}, rain chance ${rainText}, wind ${windText}, humidity ${humidityText}`;
+}
+
+async function resolveRouteLocationPoint(query = '') {
+  const searchQuery = String(query || '').trim();
+  if (!searchQuery) {
+    return null;
+  }
+
+  const matches = await resolveBySearchCandidates(searchQuery);
+  const bestMatch = chooseBestLocationMatch(searchQuery, matches);
+  if (!bestMatch || !Number.isFinite(Number(bestMatch.lat)) || !Number.isFinite(Number(bestMatch.lon))) {
+    return {
+      query: searchQuery,
+      city: searchQuery,
+      lat: null,
+      lon: null,
+      weather: null,
+    };
+  }
+
+  const weatherBundle = OWM_KEY
+    ? await weatherService.getRealtimeWeatherFromOWM(bestMatch.lat, bestMatch.lon)
+    : await weatherService.getFullWeatherCached(bestMatch.lat, bestMatch.lon);
+  const weather = {
+    city: weatherBundle?.city || bestMatch.name || searchQuery,
+    current: {
+      temp: weatherBundle?.current?.temp ?? null,
+      feelsLike: weatherBundle?.current?.feelsLike ?? weatherBundle?.current?.feels_like ?? null,
+      condition: weatherBundle?.current?.condition || null,
+      rain_probability: weatherBundle?.current?.rain_probability ?? weatherBundle?.current?.rainProbability ?? null,
+      wind: weatherBundle?.current?.wind ?? null,
+      humidity: weatherBundle?.current?.humidity ?? null,
+    },
+    hourly: Array.isArray(weatherBundle?.hourly)
+      ? weatherBundle.hourly.slice(0, 16).map((item) => ({
+        time: item?.time || null,
+        temp: item?.temp ?? null,
+        rainProbability: item?.rainProbability ?? item?.pop ?? null,
+        wind: item?.wind ?? null,
+      }))
+      : [],
+  };
+
+  return {
+    query: searchQuery,
+    city: [bestMatch.name, bestMatch.state, bestMatch.country].filter(Boolean).join(', '),
+    lat: Number(bestMatch.lat),
+    lon: Number(bestMatch.lon),
+    weather,
+  };
+}
+
+async function buildRouteWeatherContext(plannerData = {}) {
+  const profileAnswers = plannerData?.plannerProfile?.answers || {};
+  const routeStart = String(profileAnswers?.start_location || '').trim();
+  const routeEnd = String(profileAnswers?.end_location || '').trim();
+
+  if (!routeStart || !routeEnd) {
+    return null;
+  }
+
+  try {
+    const [startPoint, endPoint] = await Promise.all([
+      resolveRouteLocationPoint(routeStart),
+      resolveRouteLocationPoint(routeEnd),
+    ]);
+
+    if (!startPoint && !endPoint) {
+      return null;
+    }
+
+    return {
+      start: startPoint,
+      end: endPoint,
+      startSummary: summarizeRouteWeatherPoint(startPoint),
+      endSummary: summarizeRouteWeatherPoint(endPoint),
+    };
+  } catch (error) {
+    console.warn(`${AI_INSIGHT_DEBUG_PREFIX} route weather context failed`, {
+      error: error?.message,
+      routeStart,
+      routeEnd,
+    });
+    return null;
+  }
+}
+
+function buildPlannerRequirements(plannerData = {}, routeWeatherContext = null) {
   const activity = plannerData?.activity || 'daily routine';
   const date = plannerData?.date || 'today';
   const start = plannerData?.timeRange?.start || '09:00';
@@ -239,16 +671,46 @@ function buildPlannerRequirements(plannerData = {}) {
     ? plannerData.risks.join(', ')
     : 'none';
   const notes = plannerData?.notes || 'none';
+  const persona = String(plannerData?.persona || plannerData?.plannerProfile?.persona || 'general').toLowerCase();
+  const profileAnswers = plannerData?.plannerProfile?.answers || {};
+  const routeStart = String(profileAnswers?.start_location || '').trim();
+  const routeEnd = String(profileAnswers?.end_location || '').trim();
+  const hasRouteContext = Boolean(routeStart && routeEnd);
+
+  const routeLine = hasRouteContext
+    ? `Trip route: from ${routeStart} to ${routeEnd}.`
+    : 'Trip route: not provided.';
+
+  const routeGuidanceLine = (persona === 'driver' || persona === 'delivery')
+    ? 'Prioritize route-specific timing, rain risk, visibility and road safety for this trip.'
+    : 'Give route-aware timing if travel context is provided.';
+
+  const routeWeatherStartLine = routeWeatherContext?.startSummary
+    ? `Start location weather: ${routeWeatherContext.startSummary}.`
+    : 'Start location weather: not resolved.';
+
+  const routeWeatherEndLine = routeWeatherContext?.endSummary
+    ? `End location weather: ${routeWeatherContext.endSummary}.`
+    : 'End location weather: not resolved.';
 
   return [
     'Planner mode enabled.',
+    'Use OpenWeather route data below as source of truth for start/end conditions.',
     `User activity: ${activity}.`,
+    `User type: ${persona}.`,
     `Date: ${date}.`,
     `Time range: ${start} to ${end}.`,
     `Duration preference: ${duration}.`,
     `Risk priorities: ${risks}.`,
+    routeLine,
+    routeWeatherStartLine,
+    routeWeatherEndLine,
     `User notes: ${notes}.`,
+    routeGuidanceLine,
     'Give recommendation in Hinglish with practical timing guidance and safety actions.',
+    'Response format: Start risk, End risk, Best departure window, Precautions checklist, and Avoid/Delay window.',
+    'Mention weather comparison between both points and suggest why one time window is safer.',
+    'If any location weather is unresolved, explicitly say unresolved instead of assuming similar conditions.',
     'Mention best time window and avoid window naturally in the response if risk exists.',
   ].join(' ');
 }
@@ -396,6 +858,7 @@ export const insightService = {
       const location = plannerData?.location || {};
       const lat = plannerData?.latitude ?? location?.lat ?? null;
       const lon = plannerData?.longitude ?? location?.lon ?? null;
+      const routeWeatherContext = await buildRouteWeatherContext(plannerData);
 
       const aiPayload = {
         intent: 'planner',
@@ -409,6 +872,7 @@ export const insightService = {
           duration: plannerData?.duration || null,
           risks: plannerData?.risks || [],
           notes: plannerData?.notes || '',
+          route_weather: routeWeatherContext,
         },
         user_profile: {
           user_id: plannerData?.userId || plannerData?.user_id || null,
@@ -423,22 +887,31 @@ export const insightService = {
             planner_answers: plannerData?.plannerProfile?.answers || {},
           },
         },
-        requirements: buildPlannerRequirements(plannerData),
+        requirements: buildPlannerRequirements(plannerData, routeWeatherContext),
       };
 
       const aiResult = await getPersonalizedInsight(aiPayload);
       const recommendationRaw = aiResult?.data?.insight || 'No planner recommendation available yet.';
-      const recommendation = enforceInsightWordRange(recommendationRaw, 95);
       const windows = extractPlannerWindows(recommendationRaw);
+      const routeWindows = deriveRouteTimingGuidance(routeWeatherContext, plannerData);
       const riskLevel = inferRiskLevelFromWeather(plannerData?.weatherData, plannerData?.risks || []);
-
       const tips = buildActionableTips(aiResult?.data);
+      const bestTime = routeWindows.bestTime || windows.bestTime || `${plannerData?.timeRange?.start || '09:00'}-${plannerData?.timeRange?.end || '18:00'}`;
+      const avoidTime = routeWindows.avoidTime || windows.avoidTime || null;
+      const recommendation = formatPlannerRecommendationTemplate({
+        rawText: recommendationRaw,
+        bestTime,
+        avoidTime,
+        routeWeatherContext,
+        tips,
+        activity: plannerData?.activity,
+      });
 
       return {
         success: true,
         recommendation,
-        bestTime: windows.bestTime || `${plannerData?.timeRange?.start || '09:00'}-${plannerData?.timeRange?.end || '18:00'}`,
-        avoidTime: windows.avoidTime || null,
+        bestTime,
+        avoidTime,
         riskLevel,
         tips,
         activity: plannerData?.activity,
