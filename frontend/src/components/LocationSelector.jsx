@@ -3,17 +3,20 @@ import { MapPin, Search, Navigation, X, Check, AlertCircle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion';
 import GlassCard from './GlassCard';
 import { weatherService } from '../services/weatherService';
-import useLocation from '../hooks/useLocation';
 
-const LocationSelector = ({ isOpen, onClose, onLocationSelect }) => {
+const LocationSelector = ({
+  isOpen,
+  onClose,
+  onLocationSelect,
+  getCurrentLocation,
+  updateUserLocation,
+}) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentLocationLoading, setCurrentLocationLoading] = useState(false);
   const [error, setError] = useState('');
   
-  const { getCurrentLocation, currentLocation, updateUserLocation } = useLocation();
-
   // Search cities
   const handleSearch = async (query) => {
     if (query.length < 2) {
@@ -62,7 +65,7 @@ const LocationSelector = ({ isOpen, onClose, onLocationSelect }) => {
         };
 
         // Update in database if user is logged in
-        const saved = await updateUserLocation(locationData);
+        await updateUserLocation?.(locationData);
         
         onLocationSelect(locationData);
         onClose();
@@ -86,7 +89,7 @@ const LocationSelector = ({ isOpen, onClose, onLocationSelect }) => {
     };
 
     // Update in database if user is logged in  
-    const saved = await updateUserLocation(locationData);
+    await updateUserLocation?.(locationData);
     
     onLocationSelect(locationData);
     onClose();

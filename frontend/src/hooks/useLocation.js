@@ -4,9 +4,7 @@ import { supabase } from "../services/supabaseClient";
 import { weatherService } from "../services/weatherService";
 
 const HYPERLOCAL_CACHE_KEY = "mv_last_hyperlocal_location";
-const VIT_BHOPAL_COORDS = { lat: 23.0779, lon: 76.8508 };
-const VIT_BHOPAL_LABEL = "Academic Block-1 VIT Bhopal University";
-const VIT_BHOPAL_ADDRESS = "VIT Bhopal University, Kotri Kalan, Near Indore Road, Bhopal, Madhya Pradesh 466114";
+const DEFAULT_FALLBACK_COORDS = { lat: 20.5937, lon: 78.9629 };
 
 const toRadians = (deg) => (deg * Math.PI) / 180;
 
@@ -21,11 +19,6 @@ const distanceInMeters = (lat1, lon1, lat2, lon2) => {
       Math.sin(dLon / 2) *
       Math.sin(dLon / 2);
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
-
-const isNearVitBhopalCampus = (lat, lon) => {
-  const distance = distanceInMeters(lat, lon, VIT_BHOPAL_COORDS.lat, VIT_BHOPAL_COORDS.lon);
-  return distance <= 10000;
 };
 
 const readCachedHyperlocal = () => {
@@ -51,7 +44,8 @@ const writeCachedHyperlocal = (locationData) => {
  * Priorities:
  * 1. Current device location (hyperlocal)
  * 2. User's saved location (if device location unavailable)
- * 3. Fallback to New Delhi
+ * 3. Last resolved cached location
+ * 4. Dynamic fallback via reverse geocode
  */
 export default function useLocation() {
   const [location, setLocation] = useState(null);
@@ -61,23 +55,6 @@ export default function useLocation() {
   const [savedLocation, setSavedLocation] = useState(null);
   const [locationSource, setLocationSource] = useState("fallback");
   const { user, isLoggedIn, refreshProfile } = useAuth();
-
-  const canAutoUseGeolocation = async () => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      return false;
-    }
-
-    if (!navigator.permissions?.query) {
-      return false;
-    }
-
-    try {
-      const permission = await navigator.permissions.query({ name: "geolocation" });
-      return permission?.state === "granted";
-    } catch {
-      return false;
-    }
-  };
 
   // Get current device location with hyperlocal place lookup.
   const getCurrentLocation = () => {
@@ -91,21 +68,6 @@ export default function useLocation() {
         async (pos) => {
           const lat = pos.coords.latitude;
           const lon = pos.coords.longitude;
-
-          if (isNearVitBhopalCampus(lat, lon)) {
-            const hardcodedCampusLocation = {
-              lat,
-              lon,
-              city: VIT_BHOPAL_LABEL,
-              formattedAddress: VIT_BHOPAL_ADDRESS,
-              placeId: "hardcoded-vit-bhopal",
-            };
-
-            writeCachedHyperlocal(hardcodedCampusLocation);
-            setCurrentLocation(hardcodedCampusLocation);
-            resolve(hardcodedCampusLocation);
-            return;
-          }
 
           const nearbyPlace = await weatherService.getNearbyPlaceName(lat, lon, { radius: 1500 });
 
@@ -231,10 +193,16 @@ export default function useLocation() {
         setSavedLocation(saved);
       }
 
-      const shouldAutoRequest = await canAutoUseGeolocation();
+      // Priority 1: live location if browser permission is available.
+      try {
+        finalLocation = await getCurrentLocation();
+        setLocationSource("current");
+      } catch (locError) {
+        console.warn("Live location unavailable:", locError.message);
+      }
 
-      // Priority 1: saved profile location if present.
-      if (isLoggedIn) {
+      // Priority 2: saved profile location.
+      if (!finalLocation && isLoggedIn) {
         const saved = await getSavedLocation();
         if (saved) {
           finalLocation = saved;
@@ -242,22 +210,28 @@ export default function useLocation() {
         }
       }
 
-      // Priority 2: live location only when browser permission is already granted.
-      if (shouldAutoRequest) {
-        try {
-          finalLocation = await getCurrentLocation();
-          setLocationSource("current");
-        } catch (locError) {
-          console.warn("Live location unavailable:", locError.message);
+      // Priority 3: cached last known hyperlocal location.
+      if (!finalLocation) {
+        const cached = readCachedHyperlocal();
+        if (cached?.lat != null && cached?.lon != null) {
+          finalLocation = cached;
+          setLocationSource("cached");
         }
       }
 
-      // Priority 3: hard fallback.
+      // Priority 4: dynamic fallback from reverse geocode.
       if (!finalLocation) {
+        const nearbyPlace = await weatherService.getNearbyPlaceName(
+          DEFAULT_FALLBACK_COORDS.lat,
+          DEFAULT_FALLBACK_COORDS.lon,
+          { radius: 5000 }
+        );
         finalLocation = {
-          lat: 28.6139,
-          lon: 77.209,
-          city: "New Delhi",
+          lat: DEFAULT_FALLBACK_COORDS.lat,
+          lon: DEFAULT_FALLBACK_COORDS.lon,
+          city: nearbyPlace?.name || "Unknown",
+          formattedAddress: nearbyPlace?.formattedAddress || null,
+          placeId: nearbyPlace?.placeId || null,
         };
         setLocationSource("fallback");
       }
@@ -268,9 +242,9 @@ export default function useLocation() {
       setError(err.message);
       setLocationSource("fallback");
       setLocation({
-        lat: 28.6139,
-        lon: 77.209,
-        city: "New Delhi",
+        lat: DEFAULT_FALLBACK_COORDS.lat,
+        lon: DEFAULT_FALLBACK_COORDS.lon,
+        city: "Unknown",
       });
     } finally {
       setLoading(false);
@@ -292,6 +266,17 @@ export default function useLocation() {
     error,
     loading,
     updateUserLocation,
+    setManualLocation: (locationData) => {
+      if (!locationData?.lat || !locationData?.lon) return;
+      setLocation({
+        lat: locationData.lat,
+        lon: locationData.lon,
+        city: locationData.city || "Unknown",
+        formattedAddress: locationData.formattedAddress || null,
+        placeId: locationData.placeId || null,
+      });
+      setLocationSource(locationData?.isCurrentLocation ? "current" : "saved");
+    },
     getCurrentLocation: () => getCurrentLocation().catch(() => null),
     refreshLocation: setLocationPriority,
   };

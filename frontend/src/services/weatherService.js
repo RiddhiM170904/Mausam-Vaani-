@@ -4,7 +4,11 @@ const OWM_KEY = import.meta.env.VITE_OWM_KEY || "";
 const OWM_BASE = "https://api.openweathermap.org/data/2.5";
 const OWM_GEO = "https://api.openweathermap.org/geo/1.0";
 const OWM_ONECALL = "https://api.openweathermap.org/data/3.0/onecall";
-const GOOGLE_PLACES_API_KEY = import.meta.env.VITE_GOOGLE_PLACES_API_KEY || "";
+const GOOGLE_PLACES_API_KEY =
+  import.meta.env.VITE_GOOGLE_PLACES_API_KEY ||
+  import.meta.env.VITE_GOOGLE_MAPS_API_KEY ||
+  import.meta.env.VITE_GOOGLE_API_KEY ||
+  "";
 const ENABLE_GOOGLE_PLACES =
   Boolean(GOOGLE_PLACES_API_KEY) &&
   String(import.meta.env.VITE_ENABLE_GOOGLE_PLACES ?? "true").toLowerCase() !== "false";
@@ -20,6 +24,7 @@ const PLACES_CACHE_TTL_MS = 60 * 1000;
 const placesResponseCache = new Map();
 const placesInFlightRequests = new Map();
 const OSM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse";
+const GOOGLE_GEOCODE_BASE = "https://maps.googleapis.com/maps/api/geocode/json";
 let hasLoggedPlaces403 = false;
 let disableGooglePlacesForSession = false;
 let disableOwmOneCallAlertsForSession = false;
@@ -27,6 +32,57 @@ let disableWeatherApiAqiForSession = false;
 let hasLoggedWeatherApiAuthError = false;
 
 const getCoordCacheKey = (lat, lon) => `${Number(lat).toFixed(4)},${Number(lon).toFixed(4)}`;
+
+const toRadians = (deg) => (Number(deg) * Math.PI) / 180;
+
+const distanceMeters = (lat1, lon1, lat2, lon2) => {
+  const R = 6371000;
+  const dLat = toRadians(lat2 - lat1);
+  const dLon = toRadians(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const hasAdministrativeType = (types = []) => {
+  const normalized = Array.isArray(types) ? types.map((t) => String(t || '').toLowerCase()) : [];
+  return normalized.some((type) =>
+    type.includes('locality') ||
+    type.includes('political') ||
+    type.includes('administrative_area_level') ||
+    type.includes('sublocality')
+  );
+};
+
+const hasCampusOrPoiType = (types = []) => {
+  const normalized = Array.isArray(types) ? types.map((t) => String(t || '').toLowerCase()) : [];
+  return normalized.some((type) =>
+    type === 'university' ||
+    type === 'school' ||
+    type === 'establishment' ||
+    type === 'point_of_interest' ||
+    type === 'premise' ||
+    type === 'subpremise'
+  );
+};
+
+const scoreNearbyCandidate = (candidate, userLat, userLon) => {
+  const location = candidate?.location || {};
+  const candLat = Number(location?.latitude ?? userLat);
+  const candLon = Number(location?.longitude ?? userLon);
+  const dist = distanceMeters(Number(userLat), Number(userLon), candLat, candLon);
+  const types = candidate?.types || [];
+  const name = String(candidate?.displayName?.text || candidate?.formattedAddress || '').toLowerCase();
+
+  let score = -Math.min(dist, 5000) / 5000;
+  if (hasCampusOrPoiType(types)) score += 2;
+  if (hasAdministrativeType(types)) score -= 1.2;
+  if (/tehsil|district|state|india|madhya pradesh/.test(name)) score -= 0.8;
+  if (/academic block|block|vit|university|campus/.test(name)) score += 1.1;
+
+  return score;
+};
 
 const US_AQI_BREAKPOINTS_PM25 = [
   { cLow: 0.0, cHigh: 12.0, iLow: 0, iHigh: 50 },
@@ -58,6 +114,51 @@ const toUsAqiFromPm25 = (pm25) => {
   * Weather service — calls OpenWeatherMap directly.
  */
 export const weatherService = {
+  async getGoogleGeocodeNearbyPlace(lat, lon) {
+    if (!GOOGLE_PLACES_API_KEY) return null;
+
+    try {
+      const preferredResultTypes = [
+        "premise",
+        "subpremise",
+        "point_of_interest",
+        "establishment",
+        "route",
+      ];
+
+      for (const resultType of preferredResultTypes) {
+        const url = `${GOOGLE_GEOCODE_BASE}?latlng=${Number(lat)},${Number(lon)}&result_type=${resultType}&key=${encodeURIComponent(GOOGLE_PLACES_API_KEY)}`;
+        const response = await fetch(url);
+        if (!response.ok) continue;
+
+        const payload = await response.json();
+        const result = Array.isArray(payload?.results) ? payload.results[0] : null;
+        if (!result) continue;
+
+        const name =
+          result?.address_components?.[0]?.long_name ||
+          result?.formatted_address ||
+          null;
+
+        if (!name) continue;
+
+        return {
+          placeId: result?.place_id || null,
+          name,
+          formattedAddress: result?.formatted_address || name,
+          coordinates: {
+            lat: Number(result?.geometry?.location?.lat ?? lat),
+            lon: Number(result?.geometry?.location?.lng ?? lon),
+          },
+        };
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  },
+
   async getOpenStreetHyperlocalPlace(lat, lon, options = {}) {
     if (!ENABLE_OSM_REVERSE && !options?.bypassFlag) {
       return null;
@@ -112,6 +213,11 @@ export const weatherService = {
   },
 
   async getBestNearbyFallback(lat, lon) {
+    const googleGeocode = await this.getGoogleGeocodeNearbyPlace(lat, lon);
+    if (googleGeocode?.name) {
+      return googleGeocode;
+    }
+
     const hyperlocal = await this.getOpenStreetHyperlocalPlace(lat, lon, { bypassFlag: true });
     if (hyperlocal?.name) {
       return hyperlocal;
@@ -460,10 +566,13 @@ export const weatherService = {
         headers: {
           "Content-Type": "application/json",
           "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
-          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location",
+          "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.primaryType,places.types",
         },
         body: JSON.stringify({
-          maxResultCount: 1,
+          includedTypes: ["point_of_interest", "establishment", "university", "school"],
+          maxResultCount: 10,
+          languageCode: "en",
+          regionCode: "IN",
           rankPreference: "DISTANCE",
           locationRestriction: {
             circle: {
@@ -482,7 +591,9 @@ export const weatherService = {
         if (response.status === 403 && !hasLoggedPlaces403) {
           hasLoggedPlaces403 = true;
           disableGooglePlacesForSession = true;
-          console.warn(`${WEATHER_DEBUG_PREFIX} Places lookup failed (403). Enable Places API (New), attach billing, and allow localhost referrer for this key.`);
+          console.warn(`${WEATHER_DEBUG_PREFIX} Places lookup failed (403). Enable Places API (New), attach billing, and allow localhost referrer for this key.`, {
+            body: errorBody?.slice?.(0, 250),
+          });
         } else if (response.status !== 403) {
           console.warn(`${WEATHER_DEBUG_PREFIX} Places lookup failed`, {
             status: response.status,
@@ -495,7 +606,16 @@ export const weatherService = {
       }
 
       const payload = await response.json();
-      const place = payload?.places?.[0];
+      const places = Array.isArray(payload?.places) ? payload.places : [];
+
+      const sorted = places
+        .map((place) => ({
+          place,
+          score: scoreNearbyCandidate(place, Number(lat), Number(lon)),
+        }))
+        .sort((a, b) => b.score - a.score);
+
+      const place = sorted[0]?.place;
 
       if (!place) {
           const fallback = await this.getBestNearbyFallback(lat, lon);

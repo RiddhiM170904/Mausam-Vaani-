@@ -141,6 +141,10 @@ function normalizeInsightMessage(text) {
     .replace(/^hey\s*👋\s*/i, '')
     .replace(/^hi\s+[a-zA-Z][a-zA-Z\s]{0,20}\s*👋\s*/i, '')
     .replace(/^hi\s*👋\s*/i, '')
+    .replace(/\bpilao\b/gi, 'piyo')
+    .replace(/\bpilana\b/gi, 'peena')
+    .replace(/\bkarao\b/gi, 'karo')
+    .replace(/\baage badhna\b/gi, 'nikalna')
     .trim();
 
   return message;

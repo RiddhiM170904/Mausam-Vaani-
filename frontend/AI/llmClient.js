@@ -168,6 +168,12 @@ function sanitizeInsightOutput(text, { plannerMode = false } = {}) {
     .replace(/^[-*•]\s*/gm, '')
     .replace(/check weather.*?(\.|$)/gi, '')
     .replace(/routine continue.*?(\.|$)/gi, '')
+    .replace(/\bpilao\b/gi, 'piyo')
+    .replace(/\bpilana\b/gi, 'peena')
+    .replace(/\bkarao\b/gi, 'karo')
+    .replace(/\baage badhna\b/gi, 'nikalna')
+    .replace(/\bchhadein\b/gi, 'rakhein')
+    .replace(/\s+\./g, '.')
     .trim();
 
   const lines = cleaned
@@ -422,6 +428,10 @@ function buildPersonalizedPrompt(context, ragContext) {
     'Output Rules:',
     '- 2-3 lines max',
     '- Hinglish, WhatsApp style',
+    '- Use natural spoken Hinglish with correct grammar',
+    '- Address user in direct second-person voice (aap/tum), not third-person command forms',
+    '- Prefer action verbs like piyo, rakho, pehno, niklo, avoid awkward forms like pilao/karao',
+    '- Avoid awkward words or literal translations',
     '- Friendly tone',
     '- Max 1 emoji',
     '- Must give practical actions (umbrella, water, mask, timing)',
@@ -538,6 +548,8 @@ function buildRepairPrompt(text, context) {
     'Rewrite the insight in simple Hinglish.',
     'Rules: exactly 2 short lines, no jargon, no generic words.',
     'Must follow: Situation -> Impact -> Action.',
+    'Write in direct second-person voice (aap/tum).',
+    'Use natural verbs like piyo/rakho/pehno/niklo; avoid pilao/karao.',
     'Must include user type relevance and one clear action.',
     'No phrases like "check weather later" or "routine continue".',
     '',

@@ -20,17 +20,7 @@ import ServiceUnavailable from "../components/ServiceUnavailable";
 
 const GUEST_ONBOARDING_KEY = "mv_guest_onboarding_seen";
 
-const normalizeRainRisk = (weatherData) => {
-  const current = weatherData?.current || {};
-  const fromCurrent = Number(current?.rainProbability ?? current?.rain_probability);
-  const fromHourly = Number(weatherData?.hourly?.[0]?.rainProbability ?? weatherData?.hourly?.[0]?.pop);
-  const raw = Number.isFinite(fromCurrent) ? fromCurrent : fromHourly;
-  if (!Number.isFinite(raw)) return 0;
-  return raw > 1 ? raw / 100 : raw;
-};
-
 const INSIGHT_REFRESH_INTERVAL_MS = 20 * 60 * 1000;
-const LAST_HOME_INSIGHT_KEY = "mv_home_dynamic_insight_last_v1";
 
 const formatInsightUpdatedAt = (value) => {
   const ms = Number(value);
@@ -43,396 +33,25 @@ const formatInsightUpdatedAt = (value) => {
   });
 };
 
-const looksGenericInsight = (text) =>
-  /routine|balanced|stable|normal|manageable|check weather|stay updated|overall manageable|continue karo/i.test(
-    String(text || "")
-  );
-
-const INSIGHT_ACTION_WORDS = [
-  "carry",
-  "avoid",
-  "mask",
-  "umbrella",
-  "hydration",
-  "paani",
-  "travel",
-  "buffer",
-  "cap",
-  "shade",
-  "break",
-  "slow",
-  "jaldi",
-  "plan",
-  "rakhna",
-];
-
-const INSIGHT_SITUATION_WORDS = [
-  "rain",
-  "baarish",
-  "aqi",
-  "air",
-  "hawa",
-  "heat",
-  "garmi",
-  "humidity",
-  "wind",
-  "fog",
-  "mist",
-  "dhoop",
-  "temp",
-  "temperature",
-];
-
-const INSIGHT_TIME_WORDS = [
-  "abhi",
-  "subah",
-  "shaam",
-  "raat",
-  "morning",
-  "afternoon",
-  "evening",
-  "night",
-  "12-4",
-  "time",
-  "today",
-  "aaj",
-];
-
-const USER_ACTION_BY_PERSONA = {
-  driver: "commute",
-  delivery: "delivery run",
-  farmer: "field work",
-  worker: "outdoor kaam",
-  student: "travel",
-  senior: "daily outing",
-  office: "office commute",
-  business_owner: "shop operations",
-  commuter: "travel plan",
-  general: "daily plan",
-};
-
-function includesAny(text, words) {
-  const value = String(text || "").toLowerCase();
-  return words.some((word) => value.includes(word));
-}
-
-function getInsightQualityScore(text) {
-  const value = String(text || "").trim();
-  if (!value) return 0;
-
-  let score = 0;
-  const words = value.split(/\s+/).filter(Boolean);
-
-  if (words.length >= 14) score += 0.2;
-  if (words.length >= 20) score += 0.1;
-  if (includesAny(value, INSIGHT_SITUATION_WORDS)) score += 0.3;
-  if (includesAny(value, INSIGHT_ACTION_WORDS)) score += 0.25;
-  if (includesAny(value, INSIGHT_TIME_WORDS)) score += 0.15;
-
-  if (looksGenericInsight(value)) score -= 0.3;
-  if (/weather mostly stable|normal plans continue|manageable lag raha/i.test(value)) score -= 0.2;
-
-  return Math.max(0, Math.min(1, score));
-}
-
-function shouldReplaceWithDynamicInsight(text) {
-  if (!String(text || "").trim()) return true;
-  if (looksGenericInsight(text)) return true;
-  return getInsightQualityScore(text) < 0.55;
-}
-
-function classifyPrimaryCondition(weatherData) {
-  const current = weatherData?.current || {};
-  const temp = Number(current?.temp || 0);
-  const feelsLike = Number(current?.feels_like ?? current?.feelsLike ?? temp);
-  const aqi = Number(current?.aqi || 0);
-  const humidity = Number(current?.humidity || 0);
-  const wind = Number(current?.wind || 0);
-  const condition = String(current?.condition || "").toLowerCase();
-  const rain = normalizeRainRisk(weatherData);
-
-  const rainy = rain >= 0.35 || /rain|storm|drizzle|thunder/.test(condition);
-  const polluted = aqi >= 110 || /haze|smoke|fog|mist/.test(condition);
-  const hot = Math.max(temp, feelsLike) >= 32;
-
-  if (rainy && wind >= 22) return "storm";
-  if (rainy && polluted) return "rain_pollution";
-  if (hot && polluted) return "heat_pollution";
-  if (rainy) return "rain";
-  if (hot) return "heat";
-  if (polluted) return "pollution";
-  if (wind >= 22) return "wind";
-  if (humidity >= 82) return "humidity";
-  if (Math.min(temp, feelsLike) <= 12) return "cold";
-  return "stable";
-}
-
-function getTimeContext(hour = new Date().getHours()) {
-  if (hour < 5) return { slot: "late_night", phrase: "raat me" };
-  if (hour < 10) return { slot: "morning", phrase: "subah" };
-  if (hour < 13) return { slot: "midday", phrase: "dopahar me" };
-  if (hour < 17) return { slot: "afternoon", phrase: "abhi" };
-  if (hour < 21) return { slot: "evening", phrase: "shaam me" };
-  return { slot: "night", phrase: "raat me" };
-}
-
-function getTempLevel(tempLike) {
-  if (tempLike >= 40) return "kaafi tez garmi";
-  if (tempLike >= 35) return "strong heat";
-  if (tempLike >= 31) return "thodi garmi";
-  if (tempLike <= 12) return "thandi conditions";
-  return "mild weather";
-}
-
-function getActionItem(condition) {
-  const map = {
-    heat: "paani + cap",
-    rain: "umbrella/raincoat",
-    pollution: "mask",
-    heat_pollution: "paani + mask",
-    rain_pollution: "umbrella + mask",
-    storm: "rain gear + safer route",
-    cold: "light jacket",
-    wind: "safe speed",
-    humidity: "hydration",
-    stable: "basic hydration",
-  };
-  return map[condition] || "basic hydration";
-}
-
-function chooseVariant(options, seed) {
-  if (!Array.isArray(options) || !options.length) return "";
-  return options[Math.abs(seed) % options.length];
-}
-
-function buildLineTemplatesByCondition(condition) {
-  const templates = {
-    heat: [
-      "abhi heat thodi kam ho rahi hai lekin din bhar ki garmi feel hogi.",
-      "abhi dhoop kaafi strong hai.",
-      "garmi zyada hai aur thakan jaldi ho sakti hai.",
-    ],
-    rain: [
-      "shaam tak baarish aa sakti hai.",
-      "rain chance high lag raha hai.",
-      "road slippery ho sakti hai.",
-    ],
-    pollution: [
-      "aaj hawa thodi heavy lag rahi hai.",
-      "AQI high side pe hai.",
-      "air quality perfect nahi hai.",
-    ],
-    heat_pollution: [
-      "garmi ke saath hawa bhi heavy lag rahi hai.",
-      "heat aur AQI dono elevated hain.",
-      "body load zyada ho sakta hai.",
-    ],
-    rain_pollution: [
-      "baarish ke saath hawa bhi heavy ho sakti hai.",
-      "mixed weather conditions aa sakti hain.",
-      "weather quick change ho sakta hai.",
-    ],
-    storm: [
-      "rain aur hawa dono strong ho sakte hain.",
-      "weather jaldi badal sakta hai.",
-      "open area me extra care rakho.",
-    ],
-    cold: [
-      "subah thodi thand aur halki fog ho sakti hai.",
-      "cold weather me body slow feel kar sakti hai.",
-      "raat me thand zyada lag sakti hai.",
-    ],
-    wind: [
-      "Aaj hawa tez ho sakti hai. {user_action} me pace slow rakho.",
-      "Open road par gust aa sakte hain. Speed control me rakho.",
-      "Windy weather me dhyan se travel karo.",
-    ],
-    humidity: [
-      "Aaj humidity zyada hai. Paani pe dhyan rakho.",
-      "Chipchipi garmi me thakan jaldi ho sakti hai. Break lete raho.",
-      "Weather sticky lag sakta hai. Light kapde pehno.",
-    ],
-    stable: [
-      "abhi travel ke liye time better hai.",
-      "subah weather kaafi manageable hai.",
-      "aaj weather theek hai aur plans smooth rahenge.",
-    ],
-  };
-
-  return templates[condition] || templates.stable;
-}
-
-function buildPersonaTail(persona) {
-  const tone = {
-    driver: [
-      "Drive smooth rakho aur sudden brake avoid karo.",
-      "Road dekhkar safe speed me chalo.",
-    ],
-    delivery: [
-      "Route simple rakho taki delay kam ho.",
-      "Delivery ke beech paani peete raho.",
-    ],
-    student: [
-      "Travel se pehle essentials ready rakho.",
-      "Travel ke liye thoda jaldi niklo.",
-    ],
-    worker: [
-      "Outdoor kaam me beech-beech me break lo.",
-      "Kaam ka pace halka rakho.",
-    ],
-    senior: [
-      "Aaj comfort ko priority do.",
-      "Bahar kam time ke liye niklo.",
-    ],
-    farmer: [
-      "Field ka kaam mausam dekhkar karo.",
-      "Khuli jagah ka kaam chhote slots me rakho.",
-    ],
-    business_owner: [
-      "Aaj customer flow weather se change ho sakta hai.",
-      "Shop prep pehle se ready rakho.",
-    ],
-  };
-
-  return tone[persona] || [
-    "Aaj ka plan simple rakho.",
-    "Weather change ho to plan adjust kar lena.",
-  ];
-}
-
-function buildTimeTail(timeSlot) {
-  const timeTails = {
-    morning: [
-      "Subah ka time kaam ke liye achha hai.",
-      "Important kaam subah kar lo.",
-    ],
-    midday: [
-      "Dopahar me bahar kam time raho.",
-      "Is time me break lete raho.",
-    ],
-    afternoon: [
-      "Afternoon me pace halka rakho.",
-      "Travel time pe dhyan rakho.",
-    ],
-    evening: [
-      "Shaam me weather better ho sakta hai.",
-      "Nikalne se pehle ek quick check kar lo.",
-    ],
-    night: [
-      "Raat me safe travel pe dhyan rakho.",
-      "Light activity best rahegi.",
-    ],
-    late_night: [
-      "Late night me unnecessary travel avoid karo.",
-      "Safe rehkar hi niklo.",
-    ],
-  };
-
-  return timeTails[timeSlot] || timeTails.afternoon;
-}
-
-function simplifyFallbackLanguage(text) {
-  return String(text || "")
-    .replace(/\bwindow\b/gi, "time")
-    .replace(/\bbuffer\b/gi, "extra time")
-    .replace(/major risk trigger/gi, "weather issue")
-    .replace(/rush\s*window/gi, "bheed wala time")
-    .replace(/comparetively/gi, "comparatively")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function avoidImmediateRepeat(nextText) {
-  const message = String(nextText || "").trim();
-  if (!message) return message;
-
-  try {
-    const previous = localStorage.getItem(LAST_HOME_INSIGHT_KEY) || "";
-    if (previous && previous === message) return message;
-    localStorage.setItem(LAST_HOME_INSIGHT_KEY, message);
-  } catch {
-    // ignore localStorage failures for repeat guard.
-  }
-
-  return message;
-}
-
 const buildProfileRequirements = (user) => {
   const persona = String(user?.persona || "general");
   const risks = Array.isArray(user?.weather_risks) ? user.weather_risks.join(", ") : "none";
   return [
     `User persona: ${persona}.`,
     `Risk preferences: ${risks}.`,
-    "Give 2 short Hinglish lines in WhatsApp tone with clear actions.",
-    "Avoid generic statements.",
+    "Give 2-3 short Hinglish lines in WhatsApp tone with clear actions.",
+    "Use natural, grammatically correct Hinglish words.",
+    "Avoid awkward or uncommon verbs and avoid generic statements.",
   ].join(" ");
-};
-
-const buildCuratedHomeInsight = (weatherData, user = {}) => {
-  const name = user?.name || user?.full_name || "friend";
-  const persona = String(user?.persona || "general").toLowerCase();
-  const temp = Number(weatherData?.current?.temp || 0);
-  const feelsLike = Number(weatherData?.current?.feels_like ?? weatherData?.current?.feelsLike ?? temp);
-  const aqi = Number(weatherData?.current?.aqi || 0);
-  const humidity = Number(weatherData?.current?.humidity || 0);
-  const wind = Number(weatherData?.current?.wind || 0);
-  const rain = normalizeRainRisk(weatherData);
-
-  const thermalStress = Math.max(temp, feelsLike);
-  const primaryCondition = classifyPrimaryCondition(weatherData);
-  const timeContext = getTimeContext();
-  const tempLevel = getTempLevel(thermalStress);
-  const userAction = USER_ACTION_BY_PERSONA[persona] || USER_ACTION_BY_PERSONA.general;
-  const actionItem = getActionItem(primaryCondition);
-
-  const lineTemplates = buildLineTemplatesByCondition(primaryCondition);
-  const personaTails = buildPersonaTail(persona);
-  const timeTails = buildTimeTail(timeContext.slot);
-
-  const seedBase =
-    Math.round(thermalStress) +
-    Math.round(rain * 100) +
-    Math.round(aqi / 5) +
-    Math.round(wind) +
-    Math.round(humidity / 2) +
-    new Date().getHours() +
-    Math.floor(new Date().getMinutes() / 20);
-
-  const opener = `Hey ${name} 👋`;
-
-  const line1Template = chooseVariant(lineTemplates, seedBase + 3);
-  const line2Template = chooseVariant(personaTails, seedBase + 7);
-  const line3Template = chooseVariant(timeTails, seedBase + 11);
-
-  const line1 = String(line1Template)
-    .replace(/\{time_phrase\}/g, timeContext.phrase)
-    .replace(/\{temp_level\}/g, tempLevel)
-    .replace(/\{action_item\}/g, actionItem)
-    .replace(/\{user_action\}/g, userAction)
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const actionLine =
-    primaryCondition === "rain" || primaryCondition === "rain_pollution" || primaryCondition === "storm"
-      ? "Bahar nikalte time umbrella le jaana aur travel me thoda extra time rakhna."
-      : primaryCondition === "heat" || primaryCondition === "heat_pollution"
-        ? "Agar bahar ja rahe ho toh paani saath rakho aur direct dhoop avoid karo."
-        : primaryCondition === "pollution"
-          ? "Bahar jao toh mask use karo aur hydration maintain rakhna."
-          : primaryCondition === "cold"
-            ? "Bahar jao toh warm kapde pehenna aur thoda extra time rakhna."
-            : "Bas paani saath rakho aur zarurat ho toh weather ek baar check kar lena.";
-
-  const dynamicMessage = `${opener} ${line1} ${actionLine} ${line2Template}`
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return avoidImmediateRepeat(simplifyFallbackLanguage(dynamicMessage));
 };
 
 const getSafeInsightMessage = (insight) => {
   if (!insight) return "";
   if (typeof insight === "string") return insight;
+
+  if (typeof insight?.ai?.insight === "string" && insight.ai.insight.trim()) {
+    return insight.ai.insight;
+  }
 
   if (typeof insight?.message === "string" && insight.message.trim()) {
     return insight.message;
@@ -457,19 +76,20 @@ const getInsightLines = (insight) => {
     .filter(Boolean);
 };
 
-const getInsightTips = (insight) => {
-  if (!insight || typeof insight === "string") return [];
-
-  if (Array.isArray(insight?.tips) && insight.tips.length > 0) {
-    return insight.tips.map((tip) => String(tip)).filter(Boolean).slice(0, 3);
-  }
-
-  return [];
-};
-
 export default function Home() {
   const navigate = useNavigate();
-  const { location, currentLocation, savedLocation, locationSource, loading: locationLoading, error: locationError, refreshLocation } = useLocation();
+  const {
+    location,
+    currentLocation,
+    savedLocation,
+    locationSource,
+    loading: locationLoading,
+    error: locationError,
+    refreshLocation,
+    getCurrentLocation,
+    updateUserLocation,
+    setManualLocation,
+  } = useLocation();
   const { data, loading, error } = useWeather(location?.lat, location?.lon);
   const { isLoggedIn, user } = useAuth();
   const [insight, setInsight] = useState(null);
@@ -480,17 +100,7 @@ export default function Home() {
   const insightInFlightRef = useRef(false);
   const lastInsightKeyRef = useRef("");
   const insightMessage = getSafeInsightMessage(insight);
-  const insightSource = String(insight?.source || "").toLowerCase();
-  const insightLines = getInsightLines(insight);
-  const insightTips = getInsightTips(insight);
-  const finalInsightMessage = useMemo(() => {
-    if (!isLoggedIn || !data) return insightMessage;
-    const shouldForceTemplate = insightSource.startsWith("fallback");
-    if (shouldForceTemplate || shouldReplaceWithDynamicInsight(insightMessage)) {
-      return buildCuratedHomeInsight(data, user || {});
-    }
-    return insightMessage;
-  }, [isLoggedIn, data, insightMessage, insightSource, user]);
+  const finalInsightMessage = insightMessage;
   const finalInsightLines = useMemo(() => {
     return String(finalInsightMessage || "")
       .split(/\n+/)
@@ -599,8 +209,7 @@ export default function Home() {
 
   // Handle location selection
   const handleLocationSelect = (newLocation) => {
-    // Refresh location data
-    refreshLocation();
+    setManualLocation(newLocation);
   };
 
   if (loading || locationLoading) return <Loader />;
@@ -772,13 +381,6 @@ export default function Home() {
                       </p>
                     ))}
                   </div>
-                  {insightTips.length > 0 && (
-                    <div className="mt-3 space-y-1">
-                      {insightTips.map((tip, idx) => (
-                        <p key={idx} className="text-xs leading-relaxed text-indigo-300/90">• {tip}</p>
-                      ))}
-                    </div>
-                  )}
                   {isLoggedIn && (
                     <Link
                       to="/insights"
@@ -822,6 +424,8 @@ export default function Home() {
         isOpen={showLocationSelector}
         onClose={() => setShowLocationSelector(false)}
         onLocationSelect={handleLocationSelect}
+        getCurrentLocation={getCurrentLocation}
+        updateUserLocation={updateUserLocation}
       />
     </motion.div>
   );
